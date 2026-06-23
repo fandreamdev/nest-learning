@@ -1,1 +1,102 @@
 # nest-learning
+
+手写实现一个迷你版 NestJS，用来理解其核心机制：依赖注入、模块系统、中间件、异常过滤器等。底层 HTTP 基于 Express，装饰器元数据基于 `reflect-metadata`。
+
+源码组织模仿真实 Nest：`src/@nestjs/common`(装饰器与接口) + `src/@nestjs/core`(运行时)，应用代码(`AppModule` 等)放在 `src` 下，通过路径别名 `@nestjs/*` 引用框架。
+
+## 运行
+
+```bash
+npm install
+npm run start        # ts-node 启动，监听 3000
+npm run start:dev    # nodemon 热重载
+```
+
+启动后可访问：`GET /`、`GET /config`、`GET /users/*`、`GET /not-found`(异常演示) 等。
+
+## 设计要点
+
+框架按 Nest 的两阶段模型工作：
+
+1. **扫描阶段**(`DependenciesScanner`)：从根模块出发递归遍历模块树，把每个 provider 的**定义**和**可见性**登记进容器(`NestContainer`)，此时不实例化。
+2. **实例化阶段**(`Injector`)：定义图完整后，按 token 递归创建实例并缓存(单例)，再注册中间件与路由。
+
+「实例唯一」(实例表)与「谁能看见」(可见性表)是两个正交维度，分别由容器的两张表管理。
+
+## 已实现
+
+### 依赖注入(DI)
+- 构造注入：基于 `design:paramtypes` 自动解析构造参数类型
+- `@Injectable` / `@Inject(token)` 显式指定注入 token
+- 四种 provider 写法：类本身、`useValue`、`useClass`、`useFactory`(含 `inject`)
+- 单例缓存、按需递归实例化(声明顺序无关)
+- 依赖可见性校验(跨模块隔离)
+
+### 模块系统
+- `@Module({ imports, controllers, providers, exports })`
+- `imports` / `exports` 可见性织入，模块间隔离
+- `exports` 支持 re-export(导出另一个模块)
+- `@Global()` 全局模块，导出的 token 全局可见
+- 动态模块：`DynamicModule`(forRoot 等静态方法返回配置对象)
+- **异步动态模块**：`forRootAsync` 返回 `Promise<DynamicModule>`，扫描阶段 await 展开
+
+### 控制器与路由
+- `@Controller(prefix)`
+- HTTP 方法：`@Get` / `@Post`
+- 参数装饰器：`@Req` / `@Res` / `@Body` / `@Query` / `@Param` / `@Headers` / `@Session` / `@Ip` / `@Next`
+- 自定义参数装饰器：`createParamDecorator`
+- 响应处理：`@HttpCode`、`@Header`、`@Redirect`、`@Res({ passthrough })`
+- async 处理方法
+
+### 中间件
+- `NestModule.configure(consumer)` + `MiddlewareConsumer`
+- `consumer.apply(...).forRoutes(...).exclude(...)` 链式 API
+- 类中间件(实现 `NestMiddleware`，支持 DI)与函数中间件
+- `forRoutes` 支持字符串路径 / controller 类 / `{ path, method }`
+- 按 HTTP 方法限定 + 路径前缀匹配 + `exclude` 排除
+
+### 异常处理
+- `HttpException` 基类 + 语义化子类(`NotFoundException`、`BadRequestException` 等)
+- `HttpStatus` 状态码枚举
+- `@Catch()` 异常过滤器 + `ExceptionFilter` 接口 + `ArgumentsHost`
+- `app.useGlobalFilters(...)` 注册全局过滤器
+- `@UseFilters(...)` 方法级 / 控制器级过滤器
+- **三级优先级**：方法级 > 控制器级 > 全局 > 内置默认处理
+- `APP_FILTER`：以 provider 方式注册全局过滤器(走 DI，可注入其它 provider)
+- 过滤器实例 per-module 缓存(对齐 Nest，非全局单例)
+- 过滤器自身抛异常时的兜底保护(退回默认处理，不悬挂请求)
+
+## 尚未实现
+
+- **守卫(Guards)**：`@UseGuards`、`CanActivate`、`APP_GUARD`
+- **管道(Pipes)**：`@UsePipes`、`PipeTransform`、参数级校验/转换、内置 `ValidationPipe`
+- **拦截器(Interceptors)**：`@UseInterceptors`、`NestInterceptor`、RxJS 响应流处理、`APP_INTERCEPTOR`
+- **生命周期钩子**：`OnModuleInit` / `OnApplicationBootstrap` / `OnModuleDestroy` 等
+- **作用域(Scope)**：`REQUEST` / `TRANSIENT` 作用域(目前全部是单例)
+- **更多 provider 特性**：循环依赖(`forwardRef`)、可选依赖(`@Optional`)、属性注入
+- **更多 HTTP 方法装饰器**：`@Put` / `@Delete` / `@Patch` / `@Options` / `@Head`
+- **其它**：微服务、WebSocket、`Reflector` 元数据读取工具、测试工具(`@nestjs/testing`)等
+
+## 目录结构
+
+```
+src/
+├── @nestjs/
+│   ├── common/              # 装饰器、接口、token
+│   │   ├── exceptions/      # HttpException、@Catch、ExceptionFilter、APP_FILTER
+│   │   ├── *.decorator.ts   # @Module/@Controller/@Get/@Inject/参数装饰器等
+│   │   └── middleware.ts    # NestModule、MiddlewareConsumer 等接口
+│   └── core/                # 运行时
+│       ├── injector/        # NestContainer(容器) + Injector(实例化)
+│       ├── scanner/         # DependenciesScanner(模块扫描)
+│       ├── middleware/      # MiddlewareModule(中间件装配)
+│       ├── exceptions/      # ExceptionsHandler(异常分发)
+│       ├── router/          # RoutesResolver(路由注册)
+│       └── nest-application.ts / nest-factory.ts
+├── config/                  # ConfigModule 动态模块演示
+├── user/ other/             # 业务模块演示
+├── *.filter.ts              # 异常过滤器演示
+├── logger.middleware.ts     # 中间件演示
+├── app.module.ts            # 根模块
+└── main.ts                  # 启动入口
+```
