@@ -1,6 +1,6 @@
 import { Controller, Get, Inject } from '@nestjs/common'
 import { HttpException, HttpStatus, NotFoundException, UseFilters } from '@nestjs/common'
-import { LoggerService, UseFactoryService, UseValueService } from './log.service'
+import { LoggerService, PrefixService, UseFactoryService, UseValueService } from './log.service'
 import { UserService } from './user/user.service'
 import { OtherService } from './other/other.service'
 import { HttpExceptionFilter } from './http-exception.filter'
@@ -15,6 +15,7 @@ export class AppController {
     private otherService: OtherService,
     @Inject('CONFIG_OPTIONS') private configOptions: Record<string, any>,
     @Inject('OTHER_CONFIG') private otherConfig: string,
+    private prefixService: PrefixService,
   ) {}
   @Get('')
   async index() {
@@ -54,5 +55,11 @@ export class AppController {
   async notFound() {
     // 语义化子类：等价于 HttpException('xxx', 404)
     throw new NotFoundException('资源不存在')
+  }
+
+  @Get('prefix')
+  async prefixPage() {
+    this.prefixService.showPrefix()
+    return 'ok'
   }
 }

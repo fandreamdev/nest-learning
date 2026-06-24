@@ -1,6 +1,6 @@
 import { APP_FILTER, MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common'
 import { AppController } from './app.controller'
-import { LoggerService, UseFactoryService, UseValueService } from './log.service'
+import { LoggerService, PrefixService, UseFactoryService, UseValueService } from './log.service'
 import { UserModule } from './user/user.module'
 import { OtherModule } from './other/other.module'
 import { ConfigModule } from './config/config.module'
@@ -23,6 +23,7 @@ import { AllExceptionsFilter } from './all-exceptions.filter'
   controllers: [AppController],
   providers: [
     LoggerService,
+    PrefixService,
     {
       provide: 'PREFIX',
       useValue: 'prefix1',
