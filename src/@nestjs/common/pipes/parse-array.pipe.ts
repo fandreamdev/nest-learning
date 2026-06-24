@@ -1,31 +1,39 @@
 import { BadRequestException } from '../exceptions/http-exception'
-import { ArgumentMetadata, PipeParam, PipeTransform } from './pipe-transform'
+import { ArgumentMetadata, PipeTransform } from './pipe-transform'
+import { ValidationPipe } from './validation.pipe'
 
 /** ParseArrayPipe 的可选项 */
 export interface ParseArrayPipeOptions {
-  /** 数组每个元素再交给这个管道类逐个转换(如 ParseIntPipe -> number[]) */
-  items?: new (...args: any[]) => PipeTransform
+  /**
+   * 每个元素的「目标类型」(对齐 Nest，注意不是管道类)：
+   * 可为原始类型构造器(Number/Boolean/String)，也可为 DTO 类。
+   * 元素会以它作为 metatype 交给内部 ValidationPipe(transform:true) 转换/校验。
+   * 例：new ParseArrayPipe({ items: Number }) => number[]
+   */
+  items?: new (...args: any[]) => any
   /** 当 value 是字符串时，用该分隔符切分成数组，默认逗号 */
   separator?: string
-  /** 是否允许空数组，默认 true */
+  /** 是否允许空值(undefined/null)，true 时空值返回空数组，默认 false */
   optional?: boolean
 }
 
 /**
- * ParseArrayPipe —— 把入参规整成数组，并可对每个元素再做转换（对应 Nest 源码中的 ParseArrayPipe）。
+ * ParseArrayPipe —— 把入参规整成数组，并可对每个元素做转换/校验（对应 Nest 源码中的 ParseArrayPipe）。
  *
- * 既能处理本就是数组的值，也能把 'a,b,c' 这类字符串按分隔符切成数组；
- * 若给了 items 管道，则对每个元素逐个 transform(常配 ParseIntPipe 得到 number[])。
+ * 与真实 Nest 一致：items 是「元素目标类型」而非管道。本管道内部持有一个
+ * ValidationPipe(transform:true)，把字符串按 separator 切成数组后，对每个元素以
+ * items 作为 metatype 调用该 ValidationPipe —— 原始类型(Number/Boolean/String)走
+ * 原始类型转换，DTO 类走 plainToInstance + 规则校验。这样无需另造「元素管道」。
  */
 export class ParseArrayPipe implements PipeTransform<any, any[]> {
-  private readonly itemPipe?: PipeTransform
+  // 内部复用的校验管道：逐元素转换/校验都委托给它(对齐 Nest 的做法)
+  private readonly validationPipe = new ValidationPipe({ transform: true })
   private readonly separator: string
   private readonly optional: boolean
 
-  constructor(options: ParseArrayPipeOptions = {}) {
-    this.itemPipe = options.items ? new options.items() : undefined
+  constructor(private readonly options: ParseArrayPipeOptions = {}) {
     this.separator = options.separator ?? ','
-    this.optional = options.optional ?? true
+    this.optional = options.optional ?? false
   }
 
   async transform(value: any, metadata: ArgumentMetadata): Promise<any[]> {
@@ -44,10 +52,19 @@ export class ParseArrayPipe implements PipeTransform<any, any[]> {
       throw new BadRequestException('Validation failed (array is expected)')
     }
 
-    if (!this.itemPipe) return array
-    // 逐个元素过 items 管道(可能 async)，元数据沿用本参数的，但 type 视为该元素
+    // 未指定元素类型：仅完成「切成数组」，元素原样返回
+    if (!this.options.items) return array
+
+    // 逐个元素委托内部 ValidationPipe：以 items 作为该元素的 metatype，沿用本参数来源类型。
+    // 元素若是 DTO 校验失败，ValidationPipe 会抛 BadRequestException 冒泡出去。
     return Promise.all(
-      array.map((item) => this.itemPipe!.transform(item, { ...metadata, type: metadata.type })),
+      array.map((item) =>
+        this.validationPipe.transform(item, {
+          type: metadata.type,
+          metatype: this.options.items,
+          data: metadata.data,
+        }),
+      ),
     )
   }
 }

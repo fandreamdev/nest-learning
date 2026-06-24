@@ -33,9 +33,11 @@ export class ValidationPipe implements PipeTransform<any> {
 
   async transform(value: any, metadata: ArgumentMetadata): Promise<any> {
     const { metatype } = metadata
-    // 1) 没有 metatype 或是原生类型：没什么可校验的，原样返回
+    // 1) 没有 metatype 或是原生类型：没有 DTO 规则可校验。
+    //    但开启 transform 时仍要做「原始类型转换」(对齐 Nest PR #4117)：
+    //    metatype 是 Number/Boolean/String 时把字符串值转成对应原始类型。
     if (!metatype || !this.toValidate(metatype)) {
-      return value
+      return this.options.transform ? this.transformPrimitive(value, metatype) : value
     }
 
     // 2) plainToInstance：把普通对象塑造成 DTO 实例(便于按类读规则、支持基础类型转换)
@@ -58,6 +60,31 @@ export class ValidationPipe implements PipeTransform<any> {
   /** 仅对「自定义类 DTO」校验：原生构造器(String/Number...)与无 metatype 一律跳过 */
   private toValidate(metatype: Function): boolean {
     return !NATIVE_TYPES.includes(metatype as any)
+  }
+
+  /**
+   * 原始类型转换(对齐 Nest PR #4117 的 transformPrimitive)：
+   * 在 transform:true 下，把字符串值按 metatype 转成对应原始类型。
+   *  - Number：能转数字就转，否则原样(交由后续/其它管道处理)；
+   *  - Boolean：'true'/'false' -> 布尔；
+   *  - String：转成字符串；
+   * metatype 不是这三者(如 Object、undefined)则原样返回。
+   */
+  private transformPrimitive(value: any, metatype?: Function): any {
+    if (value === null || value === undefined) return value
+    if (metatype === Number) {
+      const n = Number(value)
+      return isNaN(n) ? value : n
+    }
+    if (metatype === Boolean) {
+      if (value === 'true' || value === true) return true
+      if (value === 'false' || value === false) return false
+      return value
+    }
+    if (metatype === String) {
+      return String(value)
+    }
+    return value
   }
 
   /**
