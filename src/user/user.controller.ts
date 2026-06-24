@@ -7,12 +7,15 @@ import {
   ParseBoolPipe,
   ParseEnumPipe,
   ParseIntPipe,
+  UseGuards,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common'
 import { NextFunction, Request, Response } from 'express'
 import { UserCreateDto } from './dto/user-creat.dto'
 import { User } from './decorator/user.decorator'
+import { Roles } from './decorator/roles.decorator'
+import { RolesGuard } from './guard/roles.guard'
 
 // 演示用枚举：ParseEnumPipe 校验入参是否为其合法成员
 enum UserRole {
@@ -72,6 +75,16 @@ export class UserController {
   @Get('role')
   handleRole(@Query('role', new ParseEnumPipe(UserRole)) role: UserRole) {
     return { role, isAdmin: role === UserRole.Admin }
+  }
+
+  // 守卫演示：@UseGuards(RolesGuard) 绑定守卫，@Roles('admin') 声明所需角色。
+  // RolesGuard 注入 Reflector 读取 @Roles，与 req.user.roles(由 x-roles 头模拟)比对。
+  // 带 x-roles: admin 头放行，否则抛 403。
+  @Get('admin')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  handleAdmin() {
+    return 'admin area'
   }
 
   // 方法级管道：@UsePipes(ValidationPipe) 对该方法所有参数生效，

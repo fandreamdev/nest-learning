@@ -10,6 +10,9 @@ export * from './exceptions/http-status.enum'
 export * from './exceptions/http-exception'
 export * from './exceptions/exception-filter'
 export * from './pipes'
+export * from './guards/can-activate'
+export * from './set-metadata.decorator'
+export * from './reflector'
 
 export interface Constructor extends Function {
   new (...args: any[]): {}

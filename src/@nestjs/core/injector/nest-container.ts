@@ -1,4 +1,4 @@
-import { APP_FILTER, APP_PIPE, ProviderType } from '@nestjs/common'
+import { APP_FILTER, APP_PIPE, APP_GUARD, ProviderType } from '@nestjs/common'
 
 /**
  * NestContainer —— DI 容器（对应 Nest 源码中的 NestContainer）。
@@ -29,6 +29,8 @@ export class NestContainer {
   private readonly appFilters: { provider: any; module: any }[] = []
   // APP_PIPE 收集表：以 provider 方式注册的全局管道(与 appFilters 同构，可重复登记)。
   private readonly appPipes: { provider: any; module: any }[] = []
+  // APP_GUARD 收集表：以 provider 方式注册的全局守卫(与 appFilters 同构，可重复登记)。
+  private readonly appGuards: { provider: any; module: any }[] = []
 
   /**
    * 登记一个 provider 的「定义」与「可见性」，但不实例化（两阶段的第一阶段）。
@@ -52,6 +54,12 @@ export class NestContainer {
       return
     }
 
+    // APP_GUARD：与 APP_FILTER 同理，单独收集成列表(可重复登记)
+    if (provide === APP_GUARD) {
+      this.appGuards.push({ provider, module })
+      return
+    }
+
     // 1) 记录可见性：该 token 在这个 module 里可被解析
     const visibleTokens = this.moduleVisibility.get(module) ?? new Set()
     visibleTokens.add(provide)
@@ -71,6 +79,11 @@ export class NestContainer {
   /** 取所有以 APP_PIPE 方式登记的全局管道 provider(含其所属模块) */
   getAppPipes(): { provider: any; module: any }[] {
     return this.appPipes
+  }
+
+  /** 取所有以 APP_GUARD 方式登记的全局守卫 provider(含其所属模块) */
+  getAppGuards(): { provider: any; module: any }[] {
+    return this.appGuards
   }
 
   /** 把一个 token 标记为全局可见（供扫描 @Global 模块时调用）。参数是 token 而非 provider 实例。 */

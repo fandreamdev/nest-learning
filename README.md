@@ -77,9 +77,18 @@ npm run start:dev    # nodemon 热重载
 - `APP_PIPE`：以 provider 方式注册全局管道(走 DI，可注入其它 provider)
 - 管道类实例 per-module 缓存(对齐 Nest，与过滤器同构)
 
+### 守卫(Guards)
+- `CanActivate` 接口 + `ExecutionContext`(在 `ArgumentsHost` 上扩展 `getClass()` / `getHandler()`)
+- **三级绑定**：全局(`useGlobalGuards` / `APP_GUARD`) > 控制器级 / 方法级(`@UseGuards`)
+- 执行时机：**中间件 → 守卫 → 管道 → 处理方法**(守卫在管道之前)
+- 任一守卫 `canActivate` 返回 `false` 即抛 `ForbiddenException`(403)，交给异常过滤器
+- `@SetMetadata` + `Reflector`(`get` / `getAllAndOverride` / `getAllAndMerge`)：守卫读取写在类/方法上的元数据
+- `Reflector` 作为全局可见的内置 provider 自动登记，守卫可直接注入
+- `APP_GUARD`：以 provider 方式注册全局守卫(走 DI，可注入其它 provider)
+- 守卫类实例 per-module 缓存(对齐 Nest，与过滤器/管道同构)
+
 ## 尚未实现
 
-- **守卫(Guards)**：`@UseGuards`、`CanActivate`、`APP_GUARD`
 - **拦截器(Interceptors)**：`@UseInterceptors`、`NestInterceptor`、RxJS 响应流处理、`APP_INTERCEPTOR`
 - **生命周期钩子**：`OnModuleInit` / `OnApplicationBootstrap` / `OnModuleDestroy` 等
 - **作用域(Scope)**：`REQUEST` / `TRANSIENT` 作用域(目前全部是单例)
@@ -95,6 +104,8 @@ src/
 │   ├── common/              # 装饰器、接口、token
 │   │   ├── exceptions/      # HttpException、@Catch、ExceptionFilter、APP_FILTER
 │   │   ├── pipes/           # PipeTransform、内置管道、ValidationPipe、校验装饰器、APP_PIPE
+│   │   ├── guards/          # CanActivate、ExecutionContext、@UseGuards、APP_GUARD
+│   │   ├── reflector.ts     # Reflector(元数据读取) + set-metadata.decorator(@SetMetadata)
 │   │   ├── *.decorator.ts   # @Module/@Controller/@Get/@Inject/参数装饰器等
 │   │   └── middleware.ts    # NestModule、MiddlewareConsumer 等接口
 │   └── core/                # 运行时
@@ -103,6 +114,7 @@ src/
 │       ├── middleware/      # MiddlewareModule(中间件装配)
 │       ├── exceptions/      # ExceptionsHandler(异常分发)
 │       ├── pipes/           # PipesConsumer(管道执行)
+│       ├── guards/          # GuardsConsumer(守卫执行)
 │       ├── router/          # RoutesResolver(路由注册)
 │       └── nest-application.ts / nest-factory.ts
 ├── config/                  # ConfigModule 动态模块演示

@@ -12,11 +12,16 @@ import {
   PARAM_PIPES_METADATA,
   ArgumentMetadata,
   getParamtype,
+  CanActivate,
+  GuardParam,
+  USE_GUARDS_WATERMARK,
+  ExecutionContext,
 } from '@nestjs/common'
 import { Logger } from '../log'
 import { Injector } from '../injector/injector'
 import { ExceptionsHandler } from '../exceptions/exceptions-handler'
 import { PipesConsumer } from '../pipes/pipes-consumer'
+import { GuardsConsumer } from '../guards/guards-consumer'
 import { ArgumentsHost } from '@nestjs/common'
 
 type HttpMethod = 'get' | 'post' | 'put' | 'delete' | 'patch' | 'options' | 'head'
@@ -36,12 +41,15 @@ export class RouterExplorer {
   private readonly filterInstances = new Map<any, Map<Function, ExceptionFilter>>()
   // 管道类的实例缓存，与过滤器同构：按「模块 -> (管道类 -> 实例)」分层，每模块一个实例。
   private readonly pipeInstances = new Map<any, Map<Function, PipeTransform>>()
+  // 守卫类的实例缓存，与过滤器/管道同构：按「模块 -> (守卫类 -> 实例)」分层，每模块一个实例。
+  private readonly guardInstances = new Map<any, Map<Function, CanActivate>>()
 
   constructor(
     private readonly app: Express,
     private readonly injector: Injector,
     private readonly exceptionsHandler: ExceptionsHandler,
     private readonly pipesConsumer: PipesConsumer,
+    private readonly guardsConsumer: GuardsConsumer,
   ) {}
 
   /**
@@ -60,6 +68,8 @@ export class RouterExplorer {
     const controllerFilters = await this.resolveFilters(Controller, module)
     // 控制器级 @UsePipes：对该 controller 下所有路由的参数生效(实例化一次复用)
     const controllerPipes = await this.resolvePipes(Controller, module)
+    // 控制器级 @UseGuards：对该 controller 下所有路由生效(实例化一次复用)
+    const controllerGuards = await this.resolveGuards(Controller, module)
 
     // 遍历 controller 原型上的每个方法，注册有 HTTP 装饰器的路由
     const controllerProtoType = Controller.prototype
@@ -81,18 +91,24 @@ export class RouterExplorer {
       // 参数级管道(@Body(pipe) 等)按参数下标预先实例化好(同样按本模块解析依赖)
       const paramPipes = await this.resolveParamPipes(controllerProtoType, methodName, module)
 
+      // 方法级 @UseGuards，与控制器级拼成「控制器 -> 方法」链(全局在 handleRequest 里再拼到最前)
+      const methodGuards = await this.resolveGuards(method, module)
+      const classMethodGuards = [...controllerGuards, ...methodGuards]
+
       const routerPath = path.posix.join('/', prefix, pathMatcher)
       const httpMethodName = httpMethod.toLowerCase() as HttpMethod
       // 把请求处理逻辑绑定到 express 对应的方法上
       this.app[httpMethodName](routerPath, (req: Request, res: Response, next: NextFunction) => {
         // handleRequest 是 async，抛出的异常交给异常处理：先局部过滤器，再全局
         this.handleRequest(
+          Controller,
           controller,
           methodName,
           method,
           req,
           res,
           next,
+          classMethodGuards,
           classMethodPipes,
           paramPipes,
         ).catch((err) =>
@@ -181,6 +197,38 @@ export class RouterExplorer {
   }
 
   /**
+   * 读取目标(controller 类 或 处理方法)上的 @UseGuards 元数据，解析成守卫实例。
+   * 与 resolveFilters / resolvePipes 同构：类走 DI 实例化并按「模块」缓存(每模块一个实例)，
+   * 实例原样使用。守卫可在构造里注入其它 provider(如 Reflector)。
+   * @param target 读取元数据的目标：Controller 类 或 方法函数
+   * @param module 当前 controller 所属模块：缓存维度 + 守卫依赖的可见性上下文
+   */
+  private async resolveGuards(target: any, module: any): Promise<CanActivate[]> {
+    const guards: GuardParam[] = Reflect.getMetadata(USE_GUARDS_WATERMARK, target) ?? []
+    const instances: CanActivate[] = []
+    for (const guard of guards) {
+      if (typeof guard === 'function') {
+        let perModule = this.guardInstances.get(module)
+        if (!perModule) {
+          perModule = new Map<Function, CanActivate>()
+          this.guardInstances.set(module, perModule)
+        }
+        let instance = perModule.get(guard)
+        if (!instance) {
+          const deps = await this.injector.resolveDependencies(guard, module)
+          instance = new (guard as any)(...deps) as CanActivate
+          perModule.set(guard, instance)
+        }
+        instances.push(instance)
+      } else {
+        // 已是实例(如 new RolesGuard())：直接用
+        instances.push(guard)
+      }
+    }
+    return instances
+  }
+
+  /**
    * 读取某方法各参数声明的「参数级管道」(@Body(pipe) / @Query('age', pipe) 写入的)，
    * 按参数下标预先实例化好(按本模块解析依赖)。返回 下标 -> 管道实例数组。
    * 在注册阶段(explore)完成实例化，请求时直接复用，无需在请求里再触碰模块上下文。
@@ -201,24 +249,39 @@ export class RouterExplorer {
   }
 
   /**
-   * 单次请求的处理流程：解析参数 -> 调用方法 -> 处理状态码/重定向/响应头 -> 发送响应。
+   * 单次请求的处理流程：执行守卫 -> 解析参数(过管道) -> 调用方法 -> 处理状态码/重定向/响应头 -> 发送响应。
+   * 守卫在管道之前执行(对齐 Nest 的 中间件->守卫->管道->处理方法 顺序)；
    * 处理方法可能是 async 的，这里统一 await，与真实 Nest 一致。
    */
   private async handleRequest(
+    Controller: new (...args: any[]) => any,
     controller: any,
     methodName: string,
     method: Function,
     req: Request,
     res: Response,
     next: NextFunction,
+    classMethodGuards: CanActivate[],
     classMethodPipes: PipeTransform[],
     paramPipes: PipeTransform[][],
   ) {
     ;(req as any).user = {
       name: 'tom1',
       age: 10,
+      // 模拟鉴权层写入的角色：从 x-roles 头取(逗号分隔)，供 RolesGuard 演示判定
+      roles: ((req.headers['x-roles'] as string) ?? '')
+        .split(',')
+        .map((r) => r.trim())
+        .filter(Boolean),
     }
-    // 参数解析现在是 async：每个参数都要流过管道链(可能含 async 的 ValidationPipe)
+
+    // 1) 守卫：在管道/处理方法之前。构造 ExecutionContext，跑「全局 + 控制器 + 方法」守卫链，
+    //    任一守卫返回 false 会抛 ForbiddenException(403)，由外层 catch 交给异常过滤器。
+    const executionContext = this.createExecutionContext(req, res, next, Controller, method)
+    const guards = [...this.guardsConsumer.getGlobalGuards(), ...classMethodGuards]
+    await this.guardsConsumer.tryActivate(executionContext, guards)
+
+    // 2) 参数解析(现在是 async)：每个参数都要流过管道链(可能含 async 的 ValidationPipe)
     const args = await this.resolveParams(
       controller,
       methodName,
@@ -362,6 +425,29 @@ export class RouterExplorer {
       Reflect.getMetadata(`params:${methodName}`, instance, methodName) || []
     return params.filter(Boolean).find((meta) => meta.key === 'Response' || meta.key === 'Next')
   }
+
+  /**
+   * 构造交给守卫的执行上下文(ExecutionContext)。
+   * 在 ArgumentsHost(switchToHttp 拿 req/res/next)的基础上，额外提供 getClass / getHandler，
+   * 供守卫配合 Reflector 读取写在 controller 类 / 处理方法上的元数据(如 @Roles)。
+   */
+  private createExecutionContext(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    Controller: new (...args: any[]) => any,
+    handler: Function,
+  ): ExecutionContext {
+    return {
+      switchToHttp: () => ({
+        getRequest: () => req,
+        getResponse: () => res,
+        getNext: () => next,
+      }),
+      getClass: () => Controller as any,
+      getHandler: () => handler,
+    }
+  }
 }
 
 /**
@@ -377,8 +463,15 @@ export class RoutesResolver {
     injector: Injector,
     exceptionsHandler: ExceptionsHandler,
     pipesConsumer: PipesConsumer,
+    guardsConsumer: GuardsConsumer,
   ) {
-    this.routerExplorer = new RouterExplorer(app, injector, exceptionsHandler, pipesConsumer)
+    this.routerExplorer = new RouterExplorer(
+      app,
+      injector,
+      exceptionsHandler,
+      pipesConsumer,
+      guardsConsumer,
+    )
   }
 
   /**
