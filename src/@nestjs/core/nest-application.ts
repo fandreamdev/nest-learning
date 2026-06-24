@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import express, { Express, RequestHandler } from 'express'
-import { ExceptionFilter } from '@nestjs/common'
+import { ExceptionFilter, PipeTransform } from '@nestjs/common'
 import { Logger } from './log'
 import { NestContainer } from './injector/nest-container'
 import { Injector } from './injector/injector'
@@ -8,6 +8,7 @@ import { DependenciesScanner } from './scanner/dependencies-scanner'
 import { RoutesResolver } from './router/routes-resolver'
 import { MiddlewareModule } from './middleware/middleware-module'
 import { ExceptionsHandler } from './exceptions/exceptions-handler'
+import { PipesConsumer } from './pipes/pipes-consumer'
 
 /**
  * NestApplication —— 应用编排者（对应 Nest 源码中的 NestApplication）。
@@ -29,6 +30,8 @@ export class NestApplication {
   private readonly middlewareModule: MiddlewareModule
   // 全局异常处理：持有全局过滤器，请求出错时统一处理
   private readonly exceptionsHandler = new ExceptionsHandler()
+  // 全局管道处理：持有全局管道，请求参数解析时统一应用
+  private readonly pipesConsumer = new PipesConsumer()
   // 扫描阶段收集到的全部模块，供路由解析时遍历各模块的 controller
   private modules: any[] = []
 
@@ -36,7 +39,12 @@ export class NestApplication {
     // module 已赋值后再创建协作组件：Injector 以根模块作为依赖可见性的默认上下文
     this.injector = new Injector(this.container, this.module)
     this.scanner = new DependenciesScanner(this.container)
-    this.routesResolver = new RoutesResolver(this.app, this.injector, this.exceptionsHandler)
+    this.routesResolver = new RoutesResolver(
+      this.app,
+      this.injector,
+      this.exceptionsHandler,
+      this.pipesConsumer,
+    )
     this.middlewareModule = new MiddlewareModule(this.app, this.injector)
 
     this.app.use(express.json()) // 用来将json格式的请求体放到req的body上
@@ -66,6 +74,19 @@ export class NestApplication {
     }
   }
 
+  /**
+   * 把以 { provide: APP_PIPE, useClass/useFactory/useValue } 登记的 provider 实例化，
+   * 注册为全局管道(与 registerAppFilters 同构)。走 DI 实例化，因此管道可注入其它 provider。
+   * 与 useGlobalPipes 注册的管道共享同一份全局管道列表。
+   */
+  private async registerAppPipes() {
+    const appPipes = this.container.getAppPipes()
+    for (const { provider, module } of appPipes) {
+      const pipe = await this.injector.instantiateProvider(provider, module)
+      this.pipesConsumer.addGlobalPipes([pipe])
+    }
+  }
+
   /** 注册路由并启动应用前的准备工作 */
   async init() {
     // 先扫描模块树：await 展开 imports 里的 Promise<DynamicModule>(forRootAsync)，登记完整定义图
@@ -74,6 +95,8 @@ export class NestApplication {
     await this.instantiateProviders()
     // 把以 APP_FILTER 方式登记的 provider 实例化并注册为全局过滤器(走 DI，可注入其它 provider)
     await this.registerAppFilters()
+    // 把以 APP_PIPE 方式登记的 provider 实例化并注册为全局管道(走 DI，可注入其它 provider)
+    await this.registerAppPipes()
     // 中间件必须在路由之前挂载：找出实现 NestModule.configure 的模块并应用其中间件
     await this.middlewareModule.register(this.modules, (moduleRef) =>
       this.scanner.getModuleClass(moduleRef),
@@ -94,6 +117,15 @@ export class NestApplication {
    */
   useGlobalFilters(...filters: ExceptionFilter[]) {
     this.exceptionsHandler.addFilters(filters)
+    return this
+  }
+
+  /**
+   * 注册全局管道(对应 Nest 的 app.useGlobalPipes)。
+   * 对所有路由的所有参数生效，按注册顺序排在控制器级/方法级/参数级管道之前。
+   */
+  useGlobalPipes(...pipes: PipeTransform[]) {
+    this.pipesConsumer.addGlobalPipes(pipes)
     return this
   }
 

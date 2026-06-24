@@ -1,6 +1,13 @@
 import { Header, HttpCode, Next, Param, Redirect, Res } from '@nestjs/common'
 import { Post } from '@nestjs/common'
 import { Req, Query, Session, Body, Controller, Get, Ip } from '@nestjs/common'
+import {
+  DefaultValuePipe,
+  ParseBoolPipe,
+  ParseIntPipe,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common'
 import { NextFunction, Request, Response } from 'express'
 import { UserCreateDto } from './dto/user-creat.dto'
 import { User } from './decorator/user.decorator'
@@ -35,8 +42,21 @@ export class UserController {
     return 'params'
   }
 
+  // 参数级管道：@Param('id', ParseIntPipe) 把路径参数转成 number；
+  // @Query 用 DefaultValuePipe 兜底后再 ParseBoolPipe，演示管道串联。
+  @Get('detail/:id')
+  handleDetail(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('active', new DefaultValuePipe('false'), ParseBoolPipe) active: boolean,
+  ) {
+    return { id, idType: typeof id, active, activeType: typeof active }
+  }
+
+  // 方法级管道：@UsePipes(ValidationPipe) 对该方法所有参数生效，
+  // 校验请求体是否符合 UserCreateDto 上声明的规则。
   @Post('create')
   @HttpCode(200)
+  @UsePipes(new ValidationPipe({ transform: true }))
   handleBody(@Body() user: UserCreateDto) {
     console.log(user)
     return JSON.stringify(user)

@@ -1,10 +1,22 @@
 import 'reflect-metadata'
 import path from 'path'
 import { Express, NextFunction, Request, Response } from 'express'
-import { ExceptionFilter, FilterParam, ParamMetadata, USE_FILTERS_WATERMARK } from '@nestjs/common'
+import {
+  ExceptionFilter,
+  FilterParam,
+  ParamMetadata,
+  USE_FILTERS_WATERMARK,
+  PipeTransform,
+  PipeParam,
+  USE_PIPES_WATERMARK,
+  PARAM_PIPES_METADATA,
+  ArgumentMetadata,
+  getParamtype,
+} from '@nestjs/common'
 import { Logger } from '../log'
 import { Injector } from '../injector/injector'
 import { ExceptionsHandler } from '../exceptions/exceptions-handler'
+import { PipesConsumer } from '../pipes/pipes-consumer'
 import { ArgumentsHost } from '@nestjs/common'
 
 type HttpMethod = 'get' | 'post' | 'put' | 'delete' | 'patch' | 'options' | 'head'
@@ -22,11 +34,14 @@ export class RouterExplorer {
   // 而非全局唯一。各模块按自身上下文解析过滤器的依赖，互不影响——同一个过滤器类
   // 被多个模块的 controller 引用时，会在各模块各建一份，依赖各自按本模块可见性校验。
   private readonly filterInstances = new Map<any, Map<Function, ExceptionFilter>>()
+  // 管道类的实例缓存，与过滤器同构：按「模块 -> (管道类 -> 实例)」分层，每模块一个实例。
+  private readonly pipeInstances = new Map<any, Map<Function, PipeTransform>>()
 
   constructor(
     private readonly app: Express,
     private readonly injector: Injector,
     private readonly exceptionsHandler: ExceptionsHandler,
+    private readonly pipesConsumer: PipesConsumer,
   ) {}
 
   /**
@@ -43,6 +58,8 @@ export class RouterExplorer {
 
     // 控制器级 @UseFilters：对该 controller 下所有路由生效(实例化一次复用)
     const controllerFilters = await this.resolveFilters(Controller, module)
+    // 控制器级 @UsePipes：对该 controller 下所有路由的参数生效(实例化一次复用)
+    const controllerPipes = await this.resolvePipes(Controller, module)
 
     // 遍历 controller 原型上的每个方法，注册有 HTTP 装饰器的路由
     const controllerProtoType = Controller.prototype
@@ -57,12 +74,28 @@ export class RouterExplorer {
       // 局部过滤器最终顺序：方法级 > 控制器级（再由 handler 落到全局之前）
       const localFilters = [...methodFilters, ...controllerFilters]
 
+      // 方法级 @UsePipes，与控制器级拼成「控制器 -> 方法」链(全局在 resolveParams 里再拼到最前)
+      const methodPipes = await this.resolvePipes(method, module)
+      const classMethodPipes = [...controllerPipes, ...methodPipes]
+
+      // 参数级管道(@Body(pipe) 等)按参数下标预先实例化好(同样按本模块解析依赖)
+      const paramPipes = await this.resolveParamPipes(controllerProtoType, methodName, module)
+
       const routerPath = path.posix.join('/', prefix, pathMatcher)
       const httpMethodName = httpMethod.toLowerCase() as HttpMethod
       // 把请求处理逻辑绑定到 express 对应的方法上
       this.app[httpMethodName](routerPath, (req: Request, res: Response, next: NextFunction) => {
         // handleRequest 是 async，抛出的异常交给异常处理：先局部过滤器，再全局
-        this.handleRequest(controller, methodName, method, req, res, next).catch((err) =>
+        this.handleRequest(
+          controller,
+          methodName,
+          method,
+          req,
+          res,
+          next,
+          classMethodPipes,
+          paramPipes,
+        ).catch((err) =>
           // handle 已自行兜住过滤器失败；再挂一个 catch 防御性收尾，杜绝 unhandled rejection
           this.exceptionsHandler
             .handle(err, req, res, next, localFilters)
@@ -109,6 +142,65 @@ export class RouterExplorer {
   }
 
   /**
+   * 读取目标(controller 类 或 处理方法)上的 @UsePipes 元数据，解析成管道实例。
+   * 与 resolveFilters 同构：类走 DI 实例化并按「模块」缓存(每模块一个实例)，实例原样使用。
+   * @param target 读取元数据的目标：Controller 类 或 方法函数
+   * @param module 当前 controller 所属模块：缓存维度 + 管道依赖的可见性上下文
+   */
+  private async resolvePipes(target: any, module: any): Promise<PipeTransform[]> {
+    const pipes: PipeParam[] = Reflect.getMetadata(USE_PIPES_WATERMARK, target) ?? []
+    return this.instantiatePipes(pipes, module)
+  }
+
+  /**
+   * 把一组管道(类或实例)解析成实例：类按本模块 DI 实例化并缓存(每模块一个)，实例原样返回。
+   * 参数级管道(@Body(Pipe)) 与 @UsePipes 共用此逻辑，保证实例化与缓存策略一致。
+   */
+  private async instantiatePipes(pipes: PipeParam[], module: any): Promise<PipeTransform[]> {
+    const instances: PipeTransform[] = []
+    for (const pipe of pipes) {
+      if (typeof pipe === 'function') {
+        let perModule = this.pipeInstances.get(module)
+        if (!perModule) {
+          perModule = new Map<Function, PipeTransform>()
+          this.pipeInstances.set(module, perModule)
+        }
+        let instance = perModule.get(pipe)
+        if (!instance) {
+          const deps = await this.injector.resolveDependencies(pipe, module)
+          instance = new (pipe as any)(...deps) as PipeTransform
+          perModule.set(pipe, instance)
+        }
+        instances.push(instance)
+      } else {
+        // 已是实例(如 new ValidationPipe())：直接用
+        instances.push(pipe)
+      }
+    }
+    return instances
+  }
+
+  /**
+   * 读取某方法各参数声明的「参数级管道」(@Body(pipe) / @Query('age', pipe) 写入的)，
+   * 按参数下标预先实例化好(按本模块解析依赖)。返回 下标 -> 管道实例数组。
+   * 在注册阶段(explore)完成实例化，请求时直接复用，无需在请求里再触碰模块上下文。
+   */
+  private async resolveParamPipes(
+    proto: any,
+    methodName: string,
+    module: any,
+  ): Promise<PipeTransform[][]> {
+    // 参数级管道元数据由参数装饰器写在 controller 原型上(target=prototype, key=方法名)
+    const paramPipes: PipeParam[][] =
+      Reflect.getMetadata(PARAM_PIPES_METADATA, proto, methodName) || []
+    const resolved: PipeTransform[][] = []
+    for (let i = 0; i < paramPipes.length; i++) {
+      resolved[i] = paramPipes[i] ? await this.instantiatePipes(paramPipes[i], module) : []
+    }
+    return resolved
+  }
+
+  /**
    * 单次请求的处理流程：解析参数 -> 调用方法 -> 处理状态码/重定向/响应头 -> 发送响应。
    * 处理方法可能是 async 的，这里统一 await，与真实 Nest 一致。
    */
@@ -119,12 +211,23 @@ export class RouterExplorer {
     req: Request,
     res: Response,
     next: NextFunction,
+    classMethodPipes: PipeTransform[],
+    paramPipes: PipeTransform[][],
   ) {
     ;(req as any).user = {
       name: 'tom1',
       age: 10,
     }
-    const args = this.resolveParams(controller, methodName, req, res, next)
+    // 参数解析现在是 async：每个参数都要流过管道链(可能含 async 的 ValidationPipe)
+    const args = await this.resolveParams(
+      controller,
+      methodName,
+      req,
+      res,
+      next,
+      classMethodPipes,
+      paramPipes,
+    )
     const result = await method.call(controller, ...args)
 
     const httpCode = Reflect.getMetadata('httpCode', method)
@@ -159,17 +262,28 @@ export class RouterExplorer {
 
   /**
    * 根据方法参数装饰器(@Req/@Body/@Query/@Param/自定义装饰器等)元数据，
-   * 从请求上下文中解析出调用该方法所需的实参数组。
+   * 从请求上下文中解析出调用该方法所需的实参数组，并让每个参数依次流过管道链。
+   *
+   * 管道链顺序(对齐 Nest)：全局 -> 控制器级 -> 方法级 -> 参数级(@Body(pipe) 等)。
+   * 每个参数的 ArgumentMetadata.metatype 取自 design:paramtypes(该参数的 TS 类型构造器)，
+   * 这正是 ValidationPipe 能识别 DTO、又自动跳过 @Req/@Res(类型被擦成 Object) 的机制。
+   * @param classMethodPipes 已排好序的「控制器级 + 方法级」管道
+   * @param paramPipes       各参数预先实例化好的「参数级管道」(按参数下标)
    */
-  private resolveParams(
+  private async resolveParams(
     instance: any,
     methodName: string,
     req: Request,
     res: Response,
     next: NextFunction,
-  ) {
+    classMethodPipes: PipeTransform[],
+    paramPipes: PipeTransform[][],
+  ): Promise<any[]> {
     const params: ParamMetadata[] =
       Reflect.getMetadata(`params:${methodName}`, instance, methodName) || []
+    // 参数的 TS 类型构造器数组(emitDecoratorMetadata 自动记录)，作为各参数的 metatype
+    const paramtypes: any[] =
+      Reflect.getMetadata('design:paramtypes', instance, methodName) ?? []
     // 自定义参数装饰器(createParamDecorator)拿到的执行上下文
     const ctx: ArgumentsHost = {
       switchToHttp: function () {
@@ -186,32 +300,60 @@ export class RouterExplorer {
         }
       },
     }
-    return params.map((paramMetaDate) => {
-      const { key, data } = paramMetaDate
-      switch (key) {
-        case 'Request':
-          return req
-        case 'Response':
-          return res
-        case 'Body':
-          return req.body
-        case 'Query':
-          return data ? req.query[data] : req.query
-        case 'Headers':
-          return data ? req.headers[data] : req.headers
-        case 'Session':
-          return data ? (req.session as Record<string, any>)[data] : req.session
-        case 'Ip':
-          return req.ip
-        case 'Param':
-          return data ? req.params[data] : req.params
-        case 'Next':
-          return next
-        case 'DecoratorFactory':
-          const { factory } = paramMetaDate
-          return factory(data, ctx)
-      }
-    })
+
+    // 先取原始值，再对每个参数应用完整管道链
+    return Promise.all(
+      params.map(async (paramMetaDate, index) => {
+        const { key, data } = paramMetaDate
+        let value: any
+        switch (key) {
+          case 'Request':
+            value = req
+            break
+          case 'Response':
+            value = res
+            break
+          case 'Body':
+            value = req.body
+            break
+          case 'Query':
+            value = data ? req.query[data] : req.query
+            break
+          case 'Headers':
+            value = data ? req.headers[data] : req.headers
+            break
+          case 'Session':
+            value = data ? (req.session as Record<string, any>)[data] : req.session
+            break
+          case 'Ip':
+            value = req.ip
+            break
+          case 'Param':
+            value = data ? req.params[data] : req.params
+            break
+          case 'Next':
+            value = next
+            break
+          case 'DecoratorFactory':
+            value = paramMetaDate.factory(data, ctx)
+            break
+        }
+
+        // 组装该参数的元信息：来源类型 + TS 类型 + 装饰器入参
+        const metadata: ArgumentMetadata = {
+          type: getParamtype(key),
+          metatype: paramtypes[index],
+          data: typeof data === 'string' ? data : undefined,
+        }
+        // 管道链(对齐 Nest 顺序)：全局 -> 控制器级+方法级 -> 参数级(预先实例化好的)
+        const pipeChain = [
+          ...this.pipesConsumer.getGlobalPipes(),
+          ...classMethodPipes,
+          ...(paramPipes[index] ?? []),
+        ]
+        return this.pipesConsumer.apply(value, metadata, pipeChain)
+      }),
+    )
   }
 
   /** 查出方法上是否声明了 @Res / @Next（框架据此决定要不要自动发送响应） */
@@ -230,8 +372,13 @@ export class RouterExplorer {
 export class RoutesResolver {
   private readonly routerExplorer: RouterExplorer
 
-  constructor(app: Express, injector: Injector, exceptionsHandler: ExceptionsHandler) {
-    this.routerExplorer = new RouterExplorer(app, injector, exceptionsHandler)
+  constructor(
+    app: Express,
+    injector: Injector,
+    exceptionsHandler: ExceptionsHandler,
+    pipesConsumer: PipesConsumer,
+  ) {
+    this.routerExplorer = new RouterExplorer(app, injector, exceptionsHandler, pipesConsumer)
   }
 
   /**

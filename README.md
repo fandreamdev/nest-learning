@@ -66,10 +66,20 @@ npm run start:dev    # nodemon 热重载
 - 过滤器实例 per-module 缓存(对齐 Nest，非全局单例)
 - 过滤器自身抛异常时的兜底保护(退回默认处理，不悬挂请求)
 
+### 管道(Pipes)
+- `PipeTransform` 接口 + `ArgumentMetadata`(`type` / `metatype` / `data`)
+- **四级绑定**：全局(`useGlobalPipes` / `APP_PIPE`) > 控制器级 / 方法级(`@UsePipes`) > 参数级(`@Body(pipe)`、`@Query('x', PipeA, PipeB)`)
+- 管道链按「全局 → 控制器 → 方法 → 参数」顺序串行 transform，前者输出喂给后者
+- `metatype` 取自 `design:paramtypes`，故 `ValidationPipe` 自动跳过 `@Req`/`@Res` 等非 DTO 参数
+- 内置管道：`ParseIntPipe` / `ParseFloatPipe` / `ParseBoolPipe` / `ParseArrayPipe` / `ParseUUIDPipe` / `DefaultValuePipe`
+- `ValidationPipe`：`toValidate` → `plainToInstance` → `validate` → 抛 `BadRequestException`(`message[]`)，结构对齐 Nest
+- 配套轻量校验装饰器(`@IsString`/`@IsInt`/`@Min`/`@MinLength` 等)作为 class-validator 的等价替身
+- `APP_PIPE`：以 provider 方式注册全局管道(走 DI，可注入其它 provider)
+- 管道类实例 per-module 缓存(对齐 Nest，与过滤器同构)
+
 ## 尚未实现
 
 - **守卫(Guards)**：`@UseGuards`、`CanActivate`、`APP_GUARD`
-- **管道(Pipes)**：`@UsePipes`、`PipeTransform`、参数级校验/转换、内置 `ValidationPipe`
 - **拦截器(Interceptors)**：`@UseInterceptors`、`NestInterceptor`、RxJS 响应流处理、`APP_INTERCEPTOR`
 - **生命周期钩子**：`OnModuleInit` / `OnApplicationBootstrap` / `OnModuleDestroy` 等
 - **作用域(Scope)**：`REQUEST` / `TRANSIENT` 作用域(目前全部是单例)
@@ -84,6 +94,7 @@ src/
 ├── @nestjs/
 │   ├── common/              # 装饰器、接口、token
 │   │   ├── exceptions/      # HttpException、@Catch、ExceptionFilter、APP_FILTER
+│   │   ├── pipes/           # PipeTransform、内置管道、ValidationPipe、校验装饰器、APP_PIPE
 │   │   ├── *.decorator.ts   # @Module/@Controller/@Get/@Inject/参数装饰器等
 │   │   └── middleware.ts    # NestModule、MiddlewareConsumer 等接口
 │   └── core/                # 运行时
@@ -91,6 +102,7 @@ src/
 │       ├── scanner/         # DependenciesScanner(模块扫描)
 │       ├── middleware/      # MiddlewareModule(中间件装配)
 │       ├── exceptions/      # ExceptionsHandler(异常分发)
+│       ├── pipes/           # PipesConsumer(管道执行)
 │       ├── router/          # RoutesResolver(路由注册)
 │       └── nest-application.ts / nest-factory.ts
 ├── config/                  # ConfigModule 动态模块演示
