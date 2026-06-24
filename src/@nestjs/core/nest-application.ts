@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import express, { Express, RequestHandler } from 'express'
-import { ExceptionFilter, PipeTransform, CanActivate, Reflector } from '@nestjs/common'
+import { ExceptionFilter, PipeTransform, CanActivate, Reflector, NestInterceptor } from '@nestjs/common'
 import { Logger } from './log'
 import { NestContainer } from './injector/nest-container'
 import { Injector } from './injector/injector'
@@ -10,6 +10,7 @@ import { MiddlewareModule } from './middleware/middleware-module'
 import { ExceptionsHandler } from './exceptions/exceptions-handler'
 import { PipesConsumer } from './pipes/pipes-consumer'
 import { GuardsConsumer } from './guards/guards-consumer'
+import { InterceptorsConsumer } from './interceptors/interceptors-consumer'
 
 /**
  * NestApplication —— 应用编排者（对应 Nest 源码中的 NestApplication）。
@@ -35,6 +36,8 @@ export class NestApplication {
   private readonly pipesConsumer = new PipesConsumer()
   // 全局守卫处理：持有全局守卫，请求进入处理方法前统一判定(在管道之前)
   private readonly guardsConsumer = new GuardsConsumer()
+  // 全局拦截器处理：持有全局拦截器，包裹处理方法实现前置/后置逻辑
+  private readonly interceptorsConsumer = new InterceptorsConsumer()
   // 扫描阶段收集到的全部模块，供路由解析时遍历各模块的 controller
   private modules: any[] = []
 
@@ -48,6 +51,7 @@ export class NestApplication {
       this.exceptionsHandler,
       this.pipesConsumer,
       this.guardsConsumer,
+      this.interceptorsConsumer,
     )
     this.middlewareModule = new MiddlewareModule(this.app, this.injector)
 
@@ -105,6 +109,19 @@ export class NestApplication {
   }
 
   /**
+   * 把以 { provide: APP_INTERCEPTOR, useClass/useFactory/useValue } 登记的 provider 实例化，
+   * 注册为全局拦截器(与 registerAppFilters 同构)。走 DI 实例化，因此拦截器可注入其它 provider。
+   * 与 useGlobalInterceptors 注册的拦截器共享同一份全局拦截器列表。
+   */
+  private async registerAppInterceptors() {
+    const appInterceptors = this.container.getAppInterceptors()
+    for (const { provider, module } of appInterceptors) {
+      const interceptor = await this.injector.instantiateProvider(provider, module)
+      this.interceptorsConsumer.addGlobalInterceptors([interceptor])
+    }
+  }
+
+  /**
    * 把 Reflector 登记为「全局可见」的内置 provider(对齐 Nest：Reflector 由核心模块提供，处处可注入)。
    * 这样守卫/拦截器在构造里注入 Reflector 即可读取 @SetMetadata 写下的元数据。
    */
@@ -127,6 +144,8 @@ export class NestApplication {
     await this.registerAppPipes()
     // 把以 APP_GUARD 方式登记的 provider 实例化并注册为全局守卫(走 DI，可注入其它 provider)
     await this.registerAppGuards()
+    // 把以 APP_INTERCEPTOR 方式登记的 provider 实例化并注册为全局拦截器(走 DI，可注入其它 provider)
+    await this.registerAppInterceptors()
     // 中间件必须在路由之前挂载：找出实现 NestModule.configure 的模块并应用其中间件
     await this.middlewareModule.register(this.modules, (moduleRef) =>
       this.scanner.getModuleClass(moduleRef),
@@ -165,6 +184,15 @@ export class NestApplication {
    */
   useGlobalGuards(...guards: CanActivate[]) {
     this.guardsConsumer.addGlobalGuards(guards)
+    return this
+  }
+
+  /**
+   * 注册全局拦截器(对应 Nest 的 app.useGlobalInterceptors)。
+   * 对所有路由生效，按注册顺序位于控制器级/方法级拦截器的更外层。
+   */
+  useGlobalInterceptors(...interceptors: NestInterceptor[]) {
+    this.interceptorsConsumer.addGlobalInterceptors(interceptors)
     return this
   }
 

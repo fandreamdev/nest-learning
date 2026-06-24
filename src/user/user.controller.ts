@@ -8,6 +8,7 @@ import {
   ParseEnumPipe,
   ParseIntPipe,
   UseGuards,
+  UseInterceptors,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common'
@@ -16,6 +17,8 @@ import { UserCreateDto } from './dto/user-creat.dto'
 import { User } from './decorator/user.decorator'
 import { Roles } from './decorator/roles.decorator'
 import { RolesGuard } from './guard/roles.guard'
+import { TransformInterceptor } from './interceptor/transform.interceptor'
+import { LoggingInterceptor } from './interceptor/logging.interceptor'
 
 // 演示用枚举：ParseEnumPipe 校验入参是否为其合法成员
 enum UserRole {
@@ -85,6 +88,15 @@ export class UserController {
   @Roles('admin')
   handleAdmin() {
     return 'admin area'
+  }
+
+  // 拦截器演示：@UseInterceptors 绑定两个拦截器。
+  // 顺序为 Logging -> Transform 由外到内包裹：前置日志先打印，返回值先被 Transform 包成
+  // { data }，再被 Logging 的 tap 记录耗时。响应体形如 { data: { name, age } }。
+  @Get('profile')
+  @UseInterceptors(LoggingInterceptor, TransformInterceptor)
+  handleProfile() {
+    return { name: 'tom', age: 18 }
   }
 
   // 方法级管道：@UsePipes(ValidationPipe) 对该方法所有参数生效，

@@ -80,16 +80,24 @@ npm run start:dev    # nodemon 热重载
 ### 守卫(Guards)
 - `CanActivate` 接口 + `ExecutionContext`(在 `ArgumentsHost` 上扩展 `getClass()` / `getHandler()`)
 - **三级绑定**：全局(`useGlobalGuards` / `APP_GUARD`) > 控制器级 / 方法级(`@UseGuards`)
-- 执行时机：**中间件 → 守卫 → 管道 → 处理方法**(守卫在管道之前)
+- 执行时机：**中间件 → 守卫 → 拦截器(前) → 管道 → 处理方法**(守卫在拦截器/管道之前)
 - 任一守卫 `canActivate` 返回 `false` 即抛 `ForbiddenException`(403)，交给异常过滤器
 - `@SetMetadata` + `Reflector`(`get` / `getAllAndOverride` / `getAllAndMerge`)：守卫读取写在类/方法上的元数据
 - `Reflector` 作为全局可见的内置 provider 自动登记，守卫可直接注入
 - `APP_GUARD`：以 provider 方式注册全局守卫(走 DI，可注入其它 provider)
 - 守卫类实例 per-module 缓存(对齐 Nest，与过滤器/管道同构)
 
+### 拦截器(Interceptors)
+- `NestInterceptor` 接口 + `CallHandler`(`handle()` 返回 RxJS `Observable`)，共享守卫的 `ExecutionContext`
+- **三级绑定**：全局(`useGlobalInterceptors` / `APP_INTERCEPTOR`) > 控制器级 / 方法级(`@UseInterceptors`)
+- 执行模型(对齐 Nest)：**守卫 → 拦截器(前置) → 管道 → 处理方法 → 拦截器(后置) → 发送响应**
+- 「由外到内」包裹：`reduceRight` 把处理方法包成最内层 `CallHandler`，全局拦截器在最外层
+- 后置逻辑对 `next.handle()` 返回的 Observable 做变换(`map`/`tap` 等)，`lastValueFrom` 取最终值作响应体
+- `APP_INTERCEPTOR`：以 provider 方式注册全局拦截器(走 DI，可注入其它 provider)
+- 拦截器类实例 per-module 缓存(对齐 Nest，与过滤器/管道/守卫同构)
+
 ## 尚未实现
 
-- **拦截器(Interceptors)**：`@UseInterceptors`、`NestInterceptor`、RxJS 响应流处理、`APP_INTERCEPTOR`
 - **生命周期钩子**：`OnModuleInit` / `OnApplicationBootstrap` / `OnModuleDestroy` 等
 - **作用域(Scope)**：`REQUEST` / `TRANSIENT` 作用域(目前全部是单例)
 - **更多 provider 特性**：循环依赖(`forwardRef`)、可选依赖(`@Optional`)、属性注入
@@ -105,6 +113,7 @@ src/
 │   │   ├── exceptions/      # HttpException、@Catch、ExceptionFilter、APP_FILTER
 │   │   ├── pipes/           # PipeTransform、内置管道、ValidationPipe、校验装饰器、APP_PIPE
 │   │   ├── guards/          # CanActivate、ExecutionContext、@UseGuards、APP_GUARD
+│   │   ├── interceptors/    # NestInterceptor、CallHandler、@UseInterceptors、APP_INTERCEPTOR
 │   │   ├── reflector.ts     # Reflector(元数据读取) + set-metadata.decorator(@SetMetadata)
 │   │   ├── *.decorator.ts   # @Module/@Controller/@Get/@Inject/参数装饰器等
 │   │   └── middleware.ts    # NestModule、MiddlewareConsumer 等接口
@@ -115,6 +124,7 @@ src/
 │       ├── exceptions/      # ExceptionsHandler(异常分发)
 │       ├── pipes/           # PipesConsumer(管道执行)
 │       ├── guards/          # GuardsConsumer(守卫执行)
+│       ├── interceptors/    # InterceptorsConsumer(拦截器执行)
 │       ├── router/          # RoutesResolver(路由注册)
 │       └── nest-application.ts / nest-factory.ts
 ├── config/                  # ConfigModule 动态模块演示

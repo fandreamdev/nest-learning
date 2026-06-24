@@ -16,12 +16,16 @@ import {
   GuardParam,
   USE_GUARDS_WATERMARK,
   ExecutionContext,
+  NestInterceptor,
+  InterceptorParam,
+  USE_INTERCEPTORS_WATERMARK,
 } from '@nestjs/common'
 import { Logger } from '../log'
 import { Injector } from '../injector/injector'
 import { ExceptionsHandler } from '../exceptions/exceptions-handler'
 import { PipesConsumer } from '../pipes/pipes-consumer'
 import { GuardsConsumer } from '../guards/guards-consumer'
+import { InterceptorsConsumer } from '../interceptors/interceptors-consumer'
 import { ArgumentsHost } from '@nestjs/common'
 
 type HttpMethod = 'get' | 'post' | 'put' | 'delete' | 'patch' | 'options' | 'head'
@@ -43,6 +47,8 @@ export class RouterExplorer {
   private readonly pipeInstances = new Map<any, Map<Function, PipeTransform>>()
   // 守卫类的实例缓存，与过滤器/管道同构：按「模块 -> (守卫类 -> 实例)」分层，每模块一个实例。
   private readonly guardInstances = new Map<any, Map<Function, CanActivate>>()
+  // 拦截器类的实例缓存，与过滤器/管道/守卫同构：按「模块 -> (拦截器类 -> 实例)」分层，每模块一个实例。
+  private readonly interceptorInstances = new Map<any, Map<Function, NestInterceptor>>()
 
   constructor(
     private readonly app: Express,
@@ -50,6 +56,7 @@ export class RouterExplorer {
     private readonly exceptionsHandler: ExceptionsHandler,
     private readonly pipesConsumer: PipesConsumer,
     private readonly guardsConsumer: GuardsConsumer,
+    private readonly interceptorsConsumer: InterceptorsConsumer,
   ) {}
 
   /**
@@ -70,6 +77,8 @@ export class RouterExplorer {
     const controllerPipes = await this.resolvePipes(Controller, module)
     // 控制器级 @UseGuards：对该 controller 下所有路由生效(实例化一次复用)
     const controllerGuards = await this.resolveGuards(Controller, module)
+    // 控制器级 @UseInterceptors：对该 controller 下所有路由生效(实例化一次复用)
+    const controllerInterceptors = await this.resolveInterceptors(Controller, module)
 
     // 遍历 controller 原型上的每个方法，注册有 HTTP 装饰器的路由
     const controllerProtoType = Controller.prototype
@@ -95,6 +104,10 @@ export class RouterExplorer {
       const methodGuards = await this.resolveGuards(method, module)
       const classMethodGuards = [...controllerGuards, ...methodGuards]
 
+      // 方法级 @UseInterceptors，与控制器级拼成「控制器 -> 方法」链(全局在 handleRequest 里再拼到最前)
+      const methodInterceptors = await this.resolveInterceptors(method, module)
+      const classMethodInterceptors = [...controllerInterceptors, ...methodInterceptors]
+
       const routerPath = path.posix.join('/', prefix, pathMatcher)
       const httpMethodName = httpMethod.toLowerCase() as HttpMethod
       // 把请求处理逻辑绑定到 express 对应的方法上
@@ -109,6 +122,7 @@ export class RouterExplorer {
           res,
           next,
           classMethodGuards,
+          classMethodInterceptors,
           classMethodPipes,
           paramPipes,
         ).catch((err) =>
@@ -229,6 +243,38 @@ export class RouterExplorer {
   }
 
   /**
+   * 读取目标(controller 类 或 处理方法)上的 @UseInterceptors 元数据，解析成拦截器实例。
+   * 与 resolveGuards 同构：类走 DI 实例化并按「模块」缓存(每模块一个实例)，实例原样使用。
+   * @param target 读取元数据的目标：Controller 类 或 方法函数
+   * @param module 当前 controller 所属模块：缓存维度 + 拦截器依赖的可见性上下文
+   */
+  private async resolveInterceptors(target: any, module: any): Promise<NestInterceptor[]> {
+    const interceptors: InterceptorParam[] =
+      Reflect.getMetadata(USE_INTERCEPTORS_WATERMARK, target) ?? []
+    const instances: NestInterceptor[] = []
+    for (const interceptor of interceptors) {
+      if (typeof interceptor === 'function') {
+        let perModule = this.interceptorInstances.get(module)
+        if (!perModule) {
+          perModule = new Map<Function, NestInterceptor>()
+          this.interceptorInstances.set(module, perModule)
+        }
+        let instance = perModule.get(interceptor)
+        if (!instance) {
+          const deps = await this.injector.resolveDependencies(interceptor, module)
+          instance = new (interceptor as any)(...deps) as NestInterceptor
+          perModule.set(interceptor, instance)
+        }
+        instances.push(instance)
+      } else {
+        // 已是实例(如 new LoggingInterceptor())：直接用
+        instances.push(interceptor)
+      }
+    }
+    return instances
+  }
+
+  /**
    * 读取某方法各参数声明的「参数级管道」(@Body(pipe) / @Query('age', pipe) 写入的)，
    * 按参数下标预先实例化好(按本模块解析依赖)。返回 下标 -> 管道实例数组。
    * 在注册阶段(explore)完成实例化，请求时直接复用，无需在请求里再触碰模块上下文。
@@ -249,9 +295,13 @@ export class RouterExplorer {
   }
 
   /**
-   * 单次请求的处理流程：执行守卫 -> 解析参数(过管道) -> 调用方法 -> 处理状态码/重定向/响应头 -> 发送响应。
-   * 守卫在管道之前执行(对齐 Nest 的 中间件->守卫->管道->处理方法 顺序)；
-   * 处理方法可能是 async 的，这里统一 await，与真实 Nest 一致。
+   * 单次请求的处理流程(对齐 Nest 的执行模型)：
+   *   守卫 -> 拦截器(前置) -> 管道 -> 处理方法 -> 拦截器(后置) -> 发送响应。
+   *
+   * 拦截器把「解析参数(过管道) + 调用处理方法」包装成最内层的 CallHandler：
+   *  - 拦截器在 next.handle() 之前的代码 = 前置逻辑(管道/处理方法执行前)；
+   *  - next.handle() 返回的 Observable 发出处理方法结果，拦截器对其做变换 = 后置逻辑。
+   * 整条链求值得到的最终值，才进入 httpCode/重定向/响应头处理并发送。
    */
   private async handleRequest(
     Controller: new (...args: any[]) => any,
@@ -262,6 +312,7 @@ export class RouterExplorer {
     res: Response,
     next: NextFunction,
     classMethodGuards: CanActivate[],
+    classMethodInterceptors: NestInterceptor[],
     classMethodPipes: PipeTransform[],
     paramPipes: PipeTransform[][],
   ) {
@@ -275,23 +326,34 @@ export class RouterExplorer {
         .filter(Boolean),
     }
 
-    // 1) 守卫：在管道/处理方法之前。构造 ExecutionContext，跑「全局 + 控制器 + 方法」守卫链，
-    //    任一守卫返回 false 会抛 ForbiddenException(403)，由外层 catch 交给异常过滤器。
+    // 守卫与拦截器共享同一个执行上下文(可拿 req/res + getClass/getHandler)
     const executionContext = this.createExecutionContext(req, res, next, Controller, method)
+
+    // 1) 守卫：在拦截器/管道/处理方法之前。任一守卫返回 false 抛 ForbiddenException(403)。
     const guards = [...this.guardsConsumer.getGlobalGuards(), ...classMethodGuards]
     await this.guardsConsumer.tryActivate(executionContext, guards)
 
-    // 2) 参数解析(现在是 async)：每个参数都要流过管道链(可能含 async 的 ValidationPipe)
-    const args = await this.resolveParams(
-      controller,
-      methodName,
-      req,
-      res,
-      next,
-      classMethodPipes,
-      paramPipes,
-    )
-    const result = await method.call(controller, ...args)
+    // 2) 最内层处理逻辑(CallHandler 触发时才执行)：解析参数(过管道) + 调用处理方法。
+    //    放进拦截器链内层，确保管道在拦截器「前置逻辑之后」执行(对齐 Nest)。
+    const handler = async () => {
+      const args = await this.resolveParams(
+        controller,
+        methodName,
+        req,
+        res,
+        next,
+        classMethodPipes,
+        paramPipes,
+      )
+      return method.call(controller, ...args)
+    }
+
+    // 3) 拦截器链：全局 -> 控制器 -> 方法，「由外到内」包裹 handler，求出经全部后置变换的最终值
+    const interceptors = [
+      ...this.interceptorsConsumer.getGlobalInterceptors(),
+      ...classMethodInterceptors,
+    ]
+    const result = await this.interceptorsConsumer.intercept(executionContext, interceptors, handler)
 
     const httpCode = Reflect.getMetadata('httpCode', method)
     const httpMethod = Reflect.getMetadata('method', method)
@@ -464,6 +526,7 @@ export class RoutesResolver {
     exceptionsHandler: ExceptionsHandler,
     pipesConsumer: PipesConsumer,
     guardsConsumer: GuardsConsumer,
+    interceptorsConsumer: InterceptorsConsumer,
   ) {
     this.routerExplorer = new RouterExplorer(
       app,
@@ -471,6 +534,7 @@ export class RoutesResolver {
       exceptionsHandler,
       pipesConsumer,
       guardsConsumer,
+      interceptorsConsumer,
     )
   }
 

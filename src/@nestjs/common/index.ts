@@ -11,6 +11,7 @@ export * from './exceptions/http-exception'
 export * from './exceptions/exception-filter'
 export * from './pipes'
 export * from './guards/can-activate'
+export * from './interceptors/nest-interceptor'
 export * from './set-metadata.decorator'
 export * from './reflector'
 
