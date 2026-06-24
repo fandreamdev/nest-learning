@@ -71,7 +71,7 @@ npm run start:dev    # nodemon 热重载
 - **四级绑定**：全局(`useGlobalPipes` / `APP_PIPE`) > 控制器级 / 方法级(`@UsePipes`) > 参数级(`@Body(pipe)`、`@Query('x', PipeA, PipeB)`)
 - 管道链按「全局 → 控制器 → 方法 → 参数」顺序串行 transform，前者输出喂给后者
 - `metatype` 取自 `design:paramtypes`，故 `ValidationPipe` 自动跳过 `@Req`/`@Res` 等非 DTO 参数
-- 内置管道：`ParseIntPipe` / `ParseFloatPipe` / `ParseBoolPipe` / `ParseArrayPipe` / `ParseUUIDPipe` / `DefaultValuePipe`
+- 内置管道：`ParseIntPipe` / `ParseFloatPipe` / `ParseBoolPipe` / `ParseArrayPipe` / `ParseUUIDPipe` / `ParseEnumPipe` / `DefaultValuePipe`
 - `ValidationPipe`：`toValidate` → `plainToInstance` → `validate` → 抛 `BadRequestException`(`message[]`)，结构对齐 Nest
 - 配套轻量校验装饰器(`@IsString`/`@IsInt`/`@Min`/`@MinLength` 等)作为 class-validator 的等价替身
 - `APP_PIPE`：以 provider 方式注册全局管道(走 DI，可注入其它 provider)

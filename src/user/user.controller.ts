@@ -3,7 +3,9 @@ import { Post } from '@nestjs/common'
 import { Req, Query, Session, Body, Controller, Get, Ip } from '@nestjs/common'
 import {
   DefaultValuePipe,
+  ParseArrayPipe,
   ParseBoolPipe,
+  ParseEnumPipe,
   ParseIntPipe,
   UsePipes,
   ValidationPipe,
@@ -11,6 +13,12 @@ import {
 import { NextFunction, Request, Response } from 'express'
 import { UserCreateDto } from './dto/user-creat.dto'
 import { User } from './decorator/user.decorator'
+
+// 演示用枚举：ParseEnumPipe 校验入参是否为其合法成员
+enum UserRole {
+  Admin = 'admin',
+  User = 'user',
+}
 
 @Controller('users')
 export class UserController {
@@ -50,6 +58,20 @@ export class UserController {
     @Query('active', new DefaultValuePipe('false'), ParseBoolPipe) active: boolean,
   ) {
     return { id, idType: typeof id, active, activeType: typeof active }
+  }
+
+  // ParseArrayPipe：items 是「元素目标类型」(Number)，非管道。
+  // ?ids=1,2,3 先按逗号切，再逐元素由内部 ValidationPipe 转成 number。
+  @Get('ids')
+  handleIds(@Query('ids', new ParseArrayPipe({ items: Number, separator: ',' })) ids: number[]) {
+    return { ids, allNumber: ids.every((i) => typeof i === 'number') }
+  }
+
+  // ParseEnumPipe：构造接收「枚举对象」UserRole，校验 ?role= 是否为其合法成员。
+  // ?role=admin 通过；?role=guest 抛 400。
+  @Get('role')
+  handleRole(@Query('role', new ParseEnumPipe(UserRole)) role: UserRole) {
+    return { role, isAdmin: role === UserRole.Admin }
   }
 
   // 方法级管道：@UsePipes(ValidationPipe) 对该方法所有参数生效，
