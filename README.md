@@ -96,9 +96,16 @@ npm run start:dev    # nodemon 热重载
 - `APP_INTERCEPTOR`：以 provider 方式注册全局拦截器(走 DI，可注入其它 provider)
 - 拦截器类实例 per-module 缓存(对齐 Nest，与过滤器/管道/守卫同构)
 
+### 生命周期钩子(Lifecycle Hooks)
+- 启动钩子：`OnModuleInit` → `OnApplicationBootstrap`(所有 provider 实例化、路由注册完毕后正序触发)
+- 关闭钩子：`OnModuleDestroy` → `BeforeApplicationShutdown` → `OnApplicationShutdown`(按初始化逆序，后建先拆)
+- 钩子可为 async，框架逐个 `await`；shutdown 类钩子会收到触发的信号(如 `SIGTERM`)
+- `app.enableShutdownHooks()`：监听 `SIGINT`/`SIGTERM`，收到后优雅关闭(先停 HTTP server 再跑关闭钩子)
+- `app.close()`：手动触发优雅关闭，与信号路径共用同一流程(幂等，避免重复执行)
+- 鸭子类型识别：实例上有对应方法即视为实现该钩子；按容器实例化顺序(Map 插入序)正序/逆序遍历
+
 ## 尚未实现
 
-- **生命周期钩子**：`OnModuleInit` / `OnApplicationBootstrap` / `OnModuleDestroy` 等
 - **作用域(Scope)**：`REQUEST` / `TRANSIENT` 作用域(目前全部是单例)
 - **更多 provider 特性**：循环依赖(`forwardRef`)、可选依赖(`@Optional`)、属性注入
 - **更多 HTTP 方法装饰器**：`@Put` / `@Delete` / `@Patch` / `@Options` / `@Head`
@@ -114,6 +121,7 @@ src/
 │   │   ├── pipes/           # PipeTransform、内置管道、ValidationPipe、校验装饰器、APP_PIPE
 │   │   ├── guards/          # CanActivate、ExecutionContext、@UseGuards、APP_GUARD
 │   │   ├── interceptors/    # NestInterceptor、CallHandler、@UseInterceptors、APP_INTERCEPTOR
+│   │   ├── hooks/           # 生命周期钩子接口(OnModuleInit / OnApplicationShutdown 等)
 │   │   ├── reflector.ts     # Reflector(元数据读取) + set-metadata.decorator(@SetMetadata)
 │   │   ├── *.decorator.ts   # @Module/@Controller/@Get/@Inject/参数装饰器等
 │   │   └── middleware.ts    # NestModule、MiddlewareConsumer 等接口

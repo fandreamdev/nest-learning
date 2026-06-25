@@ -6,6 +6,7 @@ import { OtherModule } from './other/other.module'
 import { ConfigModule } from './config/config.module'
 import { LoggerMiddleware, functionMiddleware } from './logger.middleware'
 import { AllExceptionsFilter } from './all-exceptions.filter'
+import { LifecycleService } from './lifecycle.service'
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { AllExceptionsFilter } from './all-exceptions.filter'
   providers: [
     LoggerService,
     PrefixService,
+    LifecycleService,
     {
       provide: 'PREFIX',
       useValue: 'prefix1',

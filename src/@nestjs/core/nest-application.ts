@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { Server } from 'http'
 import express, { Express, RequestHandler } from 'express'
 import { ExceptionFilter, PipeTransform, CanActivate, Reflector, NestInterceptor } from '@nestjs/common'
 import { Logger } from './log'
@@ -40,6 +41,12 @@ export class NestApplication {
   private readonly interceptorsConsumer = new InterceptorsConsumer()
   // 扫描阶段收集到的全部模块，供路由解析时遍历各模块的 controller
   private modules: any[] = []
+  // 正在监听的 HTTP server 引用，close() 时据此停止接收新连接
+  private httpServer?: Server
+  // 是否已启用关闭钩子(进程信号监听)，避免重复注册；同时持有已注册的信号处理器以便清理
+  private shutdownHooksEnabled = false
+  // 防止 close() 被重复执行(信号 + 手动调用可能并发)
+  private isClosing = false
 
   constructor(protected readonly module: any) {
     // module 已赋值后再创建协作组件：Injector 以根模块作为依赖可见性的默认上下文
@@ -130,6 +137,25 @@ export class NestApplication {
     this.container.registerGlobalToken(Reflector)
   }
 
+  /**
+   * 调用所有已实例化 provider 上某个生命周期钩子(若实现了的话)。
+   * @param hook    钩子方法名(如 'onModuleInit')
+   * @param reverse 是否逆序调用(关闭阶段用：后建先拆)
+   * @param arg     传给钩子的参数(关闭信号，仅 shutdown 类钩子用)
+   *
+   * 鸭子类型判断：实例上有同名函数就认为实现了该钩子。逐个 await，
+   * 与 Nest 一致——钩子可为 async，框架会等它完成再继续。
+   */
+  private async callHook(hook: string, reverse = false, arg?: any) {
+    const instances = this.container.getAllInstances()
+    const ordered = reverse ? [...instances].reverse() : instances
+    for (const instance of ordered) {
+      if (instance && typeof instance[hook] === 'function') {
+        await instance[hook](arg)
+      }
+    }
+  }
+
   /** 注册路由并启动应用前的准备工作 */
   async init() {
     // 先扫描模块树：await 展开 imports 里的 Promise<DynamicModule>(forRootAsync)，登记完整定义图
@@ -152,6 +178,12 @@ export class NestApplication {
     )
     // 再注册路由(controller 实例化也依赖上面的 provider 实例)
     await this.routesResolver.resolve(this.modules, (module) => this.scanner.getControllers(module))
+
+    // 所有 provider 就绪、路由注册完毕后，触发启动生命周期钩子(正序)：
+    //  onModuleInit(模块依赖就绪) -> onApplicationBootstrap(全局就绪、即将监听)
+    await this.callHook('onModuleInit')
+    await this.callHook('onApplicationBootstrap')
+
     Logger.log('Nest application successfully started', 'NestApplication')
   }
 
@@ -199,8 +231,49 @@ export class NestApplication {
   /** 启动 HTTP 服务 */
   async listen(port: number) {
     await this.init()
-    this.app.listen(port, () => {
+    this.httpServer = this.app.listen(port, () => {
       Logger.log(`Application is running on http://localhost:${port}`, 'NestApplication')
     })
+  }
+
+  /**
+   * 启用关闭钩子(对应 Nest 的 app.enableShutdownHooks)。
+   * 监听进程终止信号(默认 SIGINT/SIGTERM)，收到后触发优雅关闭：跑完关闭类钩子再退出。
+   * @param signals 要监听的信号，默认 ['SIGINT', 'SIGTERM']
+   */
+  enableShutdownHooks(signals: string[] = ['SIGINT', 'SIGTERM']) {
+    if (this.shutdownHooksEnabled) return this
+    this.shutdownHooksEnabled = true
+    for (const signal of signals) {
+      process.once(signal as NodeJS.Signals, async () => {
+        Logger.log(`Received ${signal}, shutting down...`, 'NestApplication')
+        await this.close(signal)
+        process.exit(0)
+      })
+    }
+    return this
+  }
+
+  /**
+   * 优雅关闭应用(对应 Nest 的 app.close)。
+   * 先停止 HTTP server 接收新请求，再按「初始化逆序」触发关闭类生命周期钩子：
+   *  onModuleDestroy -> beforeApplicationShutdown -> onApplicationShutdown
+   * @param signal 触发关闭的信号(由 enableShutdownHooks 传入)，手动调用时为 undefined
+   */
+  async close(signal?: string) {
+    if (this.isClosing) return
+    this.isClosing = true
+
+    // 停止接收新连接(已建立的连接由 express/node 自行收尾)
+    if (this.httpServer) {
+      await new Promise<void>((resolve) => this.httpServer!.close(() => resolve()))
+    }
+
+    // 关闭钩子按实例化的逆序调用(后建先拆)；shutdown 类钩子还会收到触发信号
+    await this.callHook('onModuleDestroy', true)
+    await this.callHook('beforeApplicationShutdown', true, signal)
+    await this.callHook('onApplicationShutdown', true, signal)
+
+    Logger.log('Nest application successfully closed', 'NestApplication')
   }
 }

@@ -130,6 +130,15 @@ export class NestContainer {
   }
 
   /**
+   * 取所有已实例化的 provider 实例，按「实例化(插入)顺序」返回。
+   * Map 保留插入顺序，故返回数组即创建先后序——生命周期钩子据此正序触发初始化、
+   * 逆序触发销毁(后建先拆)。
+   */
+  getAllInstances(): any[] {
+    return [...this.providerInstanceMap.values()]
+  }
+
+  /**
    * 判断某个 token 在指定模块里是否可解析：
    * 本模块声明/导入的可见，或 @Global() 模块导出的全局可见。
    */

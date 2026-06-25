@@ -14,6 +14,7 @@ export * from './guards/can-activate'
 export * from './interceptors/nest-interceptor'
 export * from './set-metadata.decorator'
 export * from './reflector'
+export * from './hooks/lifecycle.interface'
 
 export interface Constructor extends Function {
   new (...args: any[]): {}

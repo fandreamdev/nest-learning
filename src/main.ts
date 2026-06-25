@@ -12,6 +12,8 @@ async function bootstrap() {
       cookie: { maxAge: 1000 * 60 * 60 * 24 }, // 定义会话的cookie配置，设置cookie的最大存活时间是一天
     }),
   )
+  // 启用关闭钩子：监听 SIGINT/SIGTERM，收到后优雅关闭并依次触发 onModuleDestroy 等钩子
+  app.enableShutdownHooks()
   await app.listen(3000)
 }
 
