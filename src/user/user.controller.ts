@@ -1,5 +1,5 @@
 import { Header, HttpCode, Next, Param, Redirect, Res } from '@nestjs/common'
-import { Post } from '@nestjs/common'
+import { Post, Put, Delete, Patch } from '@nestjs/common'
 import { Req, Query, Session, Body, Controller, Get, Ip } from '@nestjs/common'
 import {
   DefaultValuePipe,
@@ -107,6 +107,23 @@ export class UserController {
   handleBody(@Body() user: UserCreateDto) {
     console.log(user)
     return JSON.stringify(user)
+  }
+
+  // 新增 HTTP 方法装饰器演示：@Put 全量更新、@Patch 局部更新、@Delete 删除。
+  // 与 @Get/@Post 同源(同一工厂生成)，仅 method 元数据不同；非 POST 默认状态码 200。
+  @Put(':id')
+  replaceUser(@Param('id') id: string, @Body() user: UserCreateDto) {
+    return { action: 'replace', id, user }
+  }
+
+  @Patch(':id')
+  updateUser(@Param('id') id: string, @Body() partial: any) {
+    return { action: 'update', id, partial }
+  }
+
+  @Delete(':id')
+  removeUser(@Param('id') id: string) {
+    return { action: 'remove', id }
   }
 
   @Get('res')

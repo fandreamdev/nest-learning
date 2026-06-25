@@ -46,7 +46,7 @@ npm run start:dev    # nodemon 热重载
 
 ### 控制器与路由
 - `@Controller(prefix)`
-- HTTP 方法：`@Get` / `@Post`
+- HTTP 方法：`@Get` / `@Post` / `@Put` / `@Delete` / `@Patch` / `@Options` / `@Head`(同一工厂生成，仅动词不同)
 - 参数装饰器：`@Req` / `@Res` / `@Body` / `@Query` / `@Param` / `@Headers` / `@Session` / `@Ip` / `@Next`
 - 自定义参数装饰器：`createParamDecorator`
 - 响应处理：`@HttpCode`、`@Header`、`@Redirect`、`@Res({ passthrough })`
@@ -111,7 +111,6 @@ npm run start:dev    # nodemon 热重载
 ## 尚未实现
 
 - **作用域(Scope)**：`REQUEST` / `TRANSIENT` 作用域(目前全部是单例)
-- **更多 HTTP 方法装饰器**：`@Put` / `@Delete` / `@Patch` / `@Options` / `@Head`
 - **其它**：微服务、WebSocket、测试工具(`@nestjs/testing`)等
 
 ## 目录结构
