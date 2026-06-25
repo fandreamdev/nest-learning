@@ -4,9 +4,7 @@ import { ArgumentMetadata, Inject, Injectable, PipeTransform } from '@nestjs/com
 export class MyPipe implements PipeTransform {
   constructor(@Inject('PREFIX') private prefix: string) {}
   transform(value: any, metadata: ArgumentMetadata) {
-    if (typeof value === 'string') {
-      value = this.prefix + value
-    }
+    console.log('prefix: ', this.prefix, ' value: ', value)
     return value
   }
 }
