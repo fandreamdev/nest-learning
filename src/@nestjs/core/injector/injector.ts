@@ -147,8 +147,17 @@ export class Injector {
       // 串行解析(而非 Promise.all)：避免多个依赖并发触发同一未缓存 provider 的重复实例化，
       // 从而保证单例 + async useFactory 只执行一次。工厂可能是 async，统一 await。
       const params: any[] = []
-      for (const dep of def.inject ?? []) {
-        // inject 项也可能是 forwardRef 包装，getOrCreateInstance 内部会解包
+      for (const rawDep of def.inject ?? []) {
+        // inject 项可能是 forwardRef 包装，先解包成真正的 token
+        const dep = resolveForwardRef(rawDep)
+        // 与构造注入/属性注入一致：inject 依赖也受模块可见性约束，不可见即报错
+        if (!this.container.isVisible(dep, module)) {
+          throw new Error(
+            `Nest can't resolve dependencies of the useFactory provider: token ${String(
+              dep,
+            )} 在该模块不可见`,
+          )
+        }
         params.push(await this.getOrCreateInstance(dep))
       }
       return await def.useFactory(...params)
