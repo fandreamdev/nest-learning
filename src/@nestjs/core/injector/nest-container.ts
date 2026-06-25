@@ -20,6 +20,10 @@ export class NestContainer {
   // 可见性表：module -> 该模块能解析到的 token 集合。负责按模块做依赖可见性隔离。
   // 注意存的是 token(可见性)，不是 provider 实例，故命名为 visibility 而非 providers。
   private readonly moduleVisibility = new Map<any, Set<any>>()
+  // 归属表：token -> 它「被声明」时所在的模块(首次登记定义的那个模块)。
+  // 实例化某 provider 时，按它自己的归属模块解析构造依赖，从而支持「同模块内 provider 互相注入」
+  // (这些 token 未必导出到根模块，但在本模块内彼此可见)。
+  private readonly ownerModuleMap = new Map<any, any>()
   // 全局可见集合：被 @Global() 标记的模块所导出的 token。
   // 这些 token 对「所有」模块可见，无需各模块单独 imports —— 是模块隔离的全局例外。
   private readonly globalProviders = new Set<any>()
@@ -73,10 +77,17 @@ export class NestContainer {
     visibleTokens.add(provide)
     this.moduleVisibility.set(module, visibleTokens)
 
-    // 2) 登记定义(若尚未登记)。注意这里只存定义，真正的 new 推迟到第二阶段
+    // 2) 登记定义(若尚未登记)。注意这里只存定义，真正的 new 推迟到第二阶段。
+    //    同时记录该 token 的「归属模块」——首次登记定义的模块即其归属(实例化时按此解析构造依赖)。
     if (!this.providerDefMap.has(provide)) {
       this.providerDefMap.set(provide, provider)
+      this.ownerModuleMap.set(provide, module)
     }
+  }
+
+  /** 取某 token 的「归属模块」(首次登记定义所在模块)；未知返回 undefined */
+  getOwnerModule(token: any): any {
+    return this.ownerModuleMap.get(token)
   }
 
   /** 取所有以 APP_FILTER 方式登记的全局过滤器 provider(含其所属模块) */

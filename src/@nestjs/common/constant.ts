@@ -11,6 +11,12 @@
 /** @Inject('token') 写在类上的元数据 key：按参数下标记录显式指定的注入 token */
 export const INJECT_TOKEN = 'injectTokens'
 
+/** @Optional() 写在类上的元数据 key：按构造参数下标记录「该依赖可选」 */
+export const OPTIONAL_DEPS_METADATA = 'optional:params'
+
+/** @Inject 写在「属性」上的元数据 key：记录属性注入的 { key: 属性名, token } 列表 */
+export const PROPERTY_DEPS_METADATA = 'self:properties_metadata'
+
 /** TS 的 emitDecoratorMetadata 自动写入的「构造/方法参数类型」key(内置约定，值固定) */
 export const PARAMTYPES_METADATA = 'design:paramtypes'
 

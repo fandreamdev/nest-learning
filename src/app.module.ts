@@ -7,11 +7,13 @@ import { ConfigModule } from './config/config.module'
 import { LoggerMiddleware, functionMiddleware } from './logger.middleware'
 import { AllExceptionsFilter } from './all-exceptions.filter'
 import { LifecycleService } from './lifecycle.service'
+import { ProviderFeaturesModule } from './provider-features/provider-features.module'
 
 @Module({
   imports: [
     UserModule,
     OtherModule,
+    ProviderFeaturesModule,
     ConfigModule.forRootAsync({
       // forRootAsync 返回 Promise<DynamicModule>：先异步拿到配置，再据此组装模块。
       // 扫描阶段会 await 这个 Promise，解析出真正的 DynamicModule 后登记。

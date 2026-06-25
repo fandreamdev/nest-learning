@@ -30,7 +30,11 @@ npm run start:dev    # nodemon 热重载
 - `@Injectable` / `@Inject(token)` 显式指定注入 token
 - 四种 provider 写法：类本身、`useValue`、`useClass`、`useFactory`(含 `inject`)
 - 单例缓存、按需递归实例化(声明顺序无关)
-- 依赖可见性校验(跨模块隔离)
+- 依赖可见性校验(跨模块隔离)；按 token 的「归属模块」解析其构造依赖(支持同模块内 provider 互相注入)
+- 可选依赖 `@Optional()`：解析不到时注入 `undefined` 而非报错
+- 属性注入：`@Inject(token)` 写在属性上，框架 `new` 之后回填
+- 循环依赖 `forwardRef(() => Xxx)`：延迟解包引用，对「在建中」的依赖返回惰性代理闭合循环
+  (约束同 Nest：循环引用只能在方法里用，不能在构造函数体内)
 
 ### 模块系统
 - `@Module({ imports, controllers, providers, exports })`
@@ -107,9 +111,8 @@ npm run start:dev    # nodemon 热重载
 ## 尚未实现
 
 - **作用域(Scope)**：`REQUEST` / `TRANSIENT` 作用域(目前全部是单例)
-- **更多 provider 特性**：循环依赖(`forwardRef`)、可选依赖(`@Optional`)、属性注入
 - **更多 HTTP 方法装饰器**：`@Put` / `@Delete` / `@Patch` / `@Options` / `@Head`
-- **其它**：微服务、WebSocket、`Reflector` 元数据读取工具、测试工具(`@nestjs/testing`)等
+- **其它**：微服务、WebSocket、测试工具(`@nestjs/testing`)等
 
 ## 目录结构
 
