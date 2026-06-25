@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { INJECT_TOKEN } from '@nestjs/common'
+import { INJECT_TOKEN, PARAMTYPES_METADATA } from '@nestjs/common'
 import { NestContainer } from './nest-container'
 
 /**
@@ -99,7 +99,7 @@ export class Injector {
    */
   async resolveDependencies(Component: any, module: any = this.rootModule): Promise<any[]> {
     // design:paramtypes 是 emitDecoratorMetadata 自动记录的构造参数类型
-    const paramtypes: any[] = Reflect.getMetadata('design:paramtypes', Component) ?? []
+    const paramtypes: any[] = Reflect.getMetadata(PARAMTYPES_METADATA, Component) ?? []
     // INJECT_TOKEN 是 @Inject('xx') 显式指定的 token，按参数下标存放
     const tokens = Reflect.getMetadata(INJECT_TOKEN, Component) ?? []
     // 串行解析依赖：避免并发触发同一未缓存 provider 的重复实例化，保证单例

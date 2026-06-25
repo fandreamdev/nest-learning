@@ -1,5 +1,12 @@
 import 'reflect-metadata'
 import { Constructor } from '.'
+import {
+  CONTROLLERS_METADATA,
+  PROVIDERS_METADATA,
+  IMPORTS_METADATA,
+  EXPORTS_METADATA,
+  MODULE_WATERMARK,
+} from './constant'
 
 export type ProviderType =
   | Function
@@ -36,11 +43,11 @@ export interface DynamicModule extends ModuleMetadata {
 
 export function Module(moduleMetadata: ModuleMetadata) {
   return function moduleDecorator(target: Constructor) {
-    Reflect.defineMetadata('controllers', moduleMetadata.controllers, target)
-    Reflect.defineMetadata('providers', moduleMetadata.providers, target)
-    Reflect.defineMetadata('imports', moduleMetadata.imports, target)
-    Reflect.defineMetadata('exports', moduleMetadata.exports, target)
+    Reflect.defineMetadata(CONTROLLERS_METADATA, moduleMetadata.controllers, target)
+    Reflect.defineMetadata(PROVIDERS_METADATA, moduleMetadata.providers, target)
+    Reflect.defineMetadata(IMPORTS_METADATA, moduleMetadata.imports, target)
+    Reflect.defineMetadata(EXPORTS_METADATA, moduleMetadata.exports, target)
 
-    Reflect.defineMetadata('isModule', true, target)
+    Reflect.defineMetadata(MODULE_WATERMARK, true, target)
   }
 }

@@ -1,9 +1,9 @@
 import 'reflect-metadata'
 import { Observable } from 'rxjs'
 import { ExecutionContext } from '../guards/can-activate'
+import { USE_INTERCEPTORS_WATERMARK } from '../constant'
 
-/** @UseInterceptors 写在 controller 类 / 处理方法上的元数据 key：记录绑定的拦截器 */
-export const USE_INTERCEPTORS_WATERMARK = 'use:interceptors'
+// USE_INTERCEPTORS_WATERMARK 已统一在 ../constant 定义，此处 import 使用。
 
 /**
  * CallHandler —— 路由处理方法的「调用句柄」（对应 Nest 源码中的 CallHandler）。

@@ -1,5 +1,14 @@
 import 'reflect-metadata'
-import { DynamicModule } from '@nestjs/common'
+import {
+  DynamicModule,
+  CONTROLLERS_METADATA,
+  PROVIDERS_METADATA,
+  IMPORTS_METADATA,
+  EXPORTS_METADATA,
+  GLOBAL_MODULE_WATERMARK,
+  MODULE_WATERMARK,
+  ModuleMetadataKey,
+} from '@nestjs/common'
 import { NestContainer } from '../injector/nest-container'
 
 /**
@@ -44,7 +53,7 @@ export class DependenciesScanner {
    * 公开方法：让外部(路由解析)无需感知动态模块细节。
    */
   getControllers(module: any): any[] {
-    return this.getModuleMetadata(module, 'controllers')
+    return this.getModuleMetadata(module, CONTROLLERS_METADATA)
   }
 
   /**
@@ -76,7 +85,7 @@ export class DependenciesScanner {
       if (!resolved || visited.has(resolved)) return
       visited.add(resolved)
       modules.push(resolved)
-      const imports = this.getModuleMetadata(resolved, 'imports')
+      const imports = this.getModuleMetadata(resolved, IMPORTS_METADATA)
       for (const importedModule of imports) {
         await visit(importedModule)
       }
@@ -97,10 +106,7 @@ export class DependenciesScanner {
    * 下游所有按模块读取 imports/providers/controllers/exports 的逻辑都走这里，
    * 从而对「静态模块 / 动态模块」透明。
    */
-  private getModuleMetadata(
-    moduleRef: any,
-    key: 'imports' | 'providers' | 'controllers' | 'exports',
-  ): any[] {
+  private getModuleMetadata(moduleRef: any, key: ModuleMetadataKey): any[] {
     if (this.isDynamicModule(moduleRef)) {
       // 动态模块：类上的静态基础元数据 + 本次 forRoot 对象携带的动态字段
       const staticMeta = Reflect.getMetadata(key, moduleRef.module) ?? []
@@ -114,10 +120,11 @@ export class DependenciesScanner {
   private isGlobalModule(moduleRef: any): boolean {
     if (this.isDynamicModule(moduleRef)) {
       return (
-        (Reflect.getMetadata('isGlobal', moduleRef.module) ?? false) || (moduleRef.global ?? false)
+        (Reflect.getMetadata(GLOBAL_MODULE_WATERMARK, moduleRef.module) ?? false) ||
+        (moduleRef.global ?? false)
       )
     }
-    return Reflect.getMetadata('isGlobal', moduleRef) ?? false
+    return Reflect.getMetadata(GLOBAL_MODULE_WATERMARK, moduleRef) ?? false
   }
 
   /**
@@ -127,7 +134,7 @@ export class DependenciesScanner {
    */
   private async registerModule(moduleRef: any) {
     // 1) 本模块自己声明的 provider —— 仅对本模块(本引用)可见
-    const providers = this.getModuleMetadata(moduleRef, 'providers')
+    const providers = this.getModuleMetadata(moduleRef, PROVIDERS_METADATA)
     for (const provider of providers) {
       this.container.registerProvider(provider, moduleRef)
     }
@@ -135,7 +142,7 @@ export class DependenciesScanner {
     // 2) 处理 imports：把每个被导入模块「导出」的 provider 登记到「本模块」的可见性下。
     //    imports 项可能是 Promise<DynamicModule>(forRootAsync)，await 后得到的就是
     //    collectModules 阶段登记过的同一个对象(Promise 结果被缓存)，身份一致。
-    const imports = this.getModuleMetadata(moduleRef, 'imports')
+    const imports = this.getModuleMetadata(moduleRef, IMPORTS_METADATA)
     for (const importedModule of imports) {
       this.registerExports(await importedModule, moduleRef)
     }
@@ -148,8 +155,8 @@ export class DependenciesScanner {
    * @param consumeRef   消费方模块引用：可见性记在它名下，表示「我 import 了你，才能注入你导出的东西」
    */
   private registerExports(moduleRef: any, consumeRef: any) {
-    const importedProviders = this.getModuleMetadata(moduleRef, 'providers')
-    const exports = this.getModuleMetadata(moduleRef, 'exports')
+    const importedProviders = this.getModuleMetadata(moduleRef, PROVIDERS_METADATA)
+    const exports = this.getModuleMetadata(moduleRef, EXPORTS_METADATA)
     // @Global() 模块(或动态 global)：它导出的 token 对所有模块全局可见
     const isGlobal = this.isGlobalModule(moduleRef)
 
@@ -181,7 +188,9 @@ export class DependenciesScanner {
       return true
     }
     return (
-      exportToken && exportToken instanceof Function && Reflect.getMetadata('isModule', exportToken)
+      exportToken &&
+      exportToken instanceof Function &&
+      Reflect.getMetadata(MODULE_WATERMARK, exportToken)
     )
   }
 }

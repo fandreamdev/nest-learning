@@ -1,20 +1,9 @@
 import 'reflect-metadata'
 import { Request, Response, NextFunction } from 'express'
+import { CATCH_WATERMARK, USE_FILTERS_WATERMARK } from '../constant'
 
-/** @Catch 写在过滤器类上的元数据 key：记录该过滤器声明捕获的异常类型 */
-export const CATCH_WATERMARK = 'catch:exceptions'
-
-/** @UseFilters 写在 controller 类 / 处理方法上的元数据 key：记录绑定的过滤器 */
-export const USE_FILTERS_WATERMARK = 'use:filters'
-
-/**
- * APP_FILTER —— 以「provider 方式」注册全局异常过滤器的特殊 token。
- *
- * 在任意模块的 providers 里写 { provide: APP_FILTER, useClass: XxFilter } 即可把
- * XxFilter 注册为全局过滤器。相比 app.useGlobalFilters(new XxFilter())，它的过滤器
- * 走 DI 容器实例化，因此可以在构造里注入其它 provider；同一 token 可登记多个。
- */
-export const APP_FILTER = 'APP_FILTER'
+// CATCH_WATERMARK / USE_FILTERS_WATERMARK / APP_FILTER 已统一在 ../constant 定义，
+// 此处仅 import 使用；APP_FILTER 由 barrel 从 constant 直接导出。
 
 /**
  * ArgumentsHost —— 执行上下文（对应 Nest 源码中的 ArgumentsHost）。

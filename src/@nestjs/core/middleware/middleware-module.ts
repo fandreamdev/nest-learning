@@ -9,6 +9,7 @@ import {
   RequestMethod,
   RouteInfo,
   RouteSpec,
+  CONTROLLER_PREFIX_METADATA,
 } from '@nestjs/common'
 import { Logger } from '../log'
 import { Injector } from '../injector/injector'
@@ -118,7 +119,7 @@ export class MiddlewareModule {
     }
     // controller 类：取 @Controller 前缀，等价于该 controller 的全部路由(不限方法)
     if (typeof spec === 'function') {
-      const prefix = Reflect.getMetadata('prefix', spec) ?? ''
+      const prefix = Reflect.getMetadata(CONTROLLER_PREFIX_METADATA, spec) ?? ''
       return [{ path: this.cleanPath(prefix), method: RequestMethod.ALL }]
     }
     // RouteInfo：精确到方法 + 路径

@@ -1,5 +1,6 @@
 import 'reflect-metadata'
-import { PipeParam, Paramtype, PARAM_PIPES_METADATA } from './pipes/pipe-transform'
+import { PipeParam, Paramtype } from './pipes/pipe-transform'
+import { PARAM_PIPES_METADATA, routeParamsMetadataKey } from './constant'
 
 export interface ParamMetadata {
   parameterIndex: number
@@ -41,7 +42,8 @@ export const createParamDecorator = (keyOrFactory: string | Function) => {
       const data = isData ? dataOrPipe : undefined
       const pipes = isData ? rest : [dataOrPipe, ...rest].filter(Boolean)
 
-      const existingParams = Reflect.getMetadata(`params:${propertyKey}`, target, propertyKey) || []
+      const existingParams =
+        Reflect.getMetadata(routeParamsMetadataKey(propertyKey), target, propertyKey) || []
       if (keyOrFactory instanceof Function) {
         existingParams[parameterIndex] = {
           parameterIndex,
@@ -52,7 +54,7 @@ export const createParamDecorator = (keyOrFactory: string | Function) => {
       } else {
         existingParams[parameterIndex] = { parameterIndex, key: keyOrFactory, data }
       }
-      Reflect.defineMetadata(`params:${propertyKey}`, existingParams, target, propertyKey)
+      Reflect.defineMetadata(routeParamsMetadataKey(propertyKey), existingParams, target, propertyKey)
 
       definePipesForParam(target, propertyKey, parameterIndex, pipes)
     }

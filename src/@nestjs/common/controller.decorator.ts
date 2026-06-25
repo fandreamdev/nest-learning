@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { Constructor } from '.'
+import { CONTROLLER_PREFIX_METADATA } from './constant'
 
 interface ControllerOptions {
   prefix?: string
@@ -18,6 +19,6 @@ export function Controller(prefixOrOptions?: string | ControllerOptions) {
     options.prefix = ''
   }
   return function controllerDecorator(target: Constructor) {
-    Reflect.defineMetadata('prefix', options.prefix || '', target)
+    Reflect.defineMetadata(CONTROLLER_PREFIX_METADATA, options.prefix || '', target)
   }
 }

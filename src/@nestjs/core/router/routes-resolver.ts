@@ -19,6 +19,15 @@ import {
   NestInterceptor,
   InterceptorParam,
   USE_INTERCEPTORS_WATERMARK,
+  CONTROLLER_PREFIX_METADATA,
+  METHOD_METADATA,
+  PATH_METADATA,
+  HTTP_CODE_METADATA,
+  HEADERS_METADATA,
+  REDIRECT_URL_METADATA,
+  REDIRECT_STATUS_METADATA,
+  PARAMTYPES_METADATA,
+  routeParamsMetadataKey,
 } from '@nestjs/common'
 import { Logger } from '../log'
 import { Injector } from '../injector/injector'
@@ -68,7 +77,7 @@ export class RouterExplorer {
     // 解析 controller 构造依赖并实例化(依赖解析是异步的，需 await)
     const params = await this.injector.resolveDependencies(Controller, module)
     const controller = new Controller(...params)
-    const prefix = Reflect.getMetadata('prefix', Controller) || '/'
+    const prefix = Reflect.getMetadata(CONTROLLER_PREFIX_METADATA, Controller) || '/'
     Logger.log(`${Controller.name} {${prefix}}`, 'RoutersResolver')
 
     // 控制器级 @UseFilters：对该 controller 下所有路由生效(实例化一次复用)
@@ -84,8 +93,8 @@ export class RouterExplorer {
     const controllerProtoType = Controller.prototype
     for (const methodName of Object.getOwnPropertyNames(controllerProtoType)) {
       const method = controllerProtoType[methodName]
-      const httpMethod = Reflect.getMetadata('method', method)
-      const pathMatcher = Reflect.getMetadata('path', method)
+      const httpMethod = Reflect.getMetadata(METHOD_METADATA, method)
+      const pathMatcher = Reflect.getMetadata(PATH_METADATA, method)
       if (!httpMethod) continue
 
       // 方法级 @UseFilters：优先级最高，排在控制器级之前
@@ -355,8 +364,8 @@ export class RouterExplorer {
     ]
     const result = await this.interceptorsConsumer.intercept(executionContext, interceptors, handler)
 
-    const httpCode = Reflect.getMetadata('httpCode', method)
-    const httpMethod = Reflect.getMetadata('method', method)
+    const httpCode = Reflect.getMetadata(HTTP_CODE_METADATA, method)
+    const httpMethod = Reflect.getMetadata(METHOD_METADATA, method)
     if (httpCode) {
       res.statusCode = httpCode
     } else if (httpMethod === 'POST') {
@@ -364,8 +373,8 @@ export class RouterExplorer {
     }
 
     // 如果需要重定向，直接进行重定向
-    const redirectUrl = Reflect.getMetadata('redirectUrl', method)
-    const redirectStatus = Reflect.getMetadata('redirectStatusCode', method)
+    const redirectUrl = Reflect.getMetadata(REDIRECT_URL_METADATA, method)
+    const redirectStatus = Reflect.getMetadata(REDIRECT_STATUS_METADATA, method)
     if (redirectUrl) {
       const url = result.url ?? redirectUrl
       const statusCode = result.statusCode ?? redirectStatus
@@ -375,7 +384,7 @@ export class RouterExplorer {
     // 没有用 @Res 接管响应(或声明了 passthrough)时，由框架负责设置响应头并发送结果
     const responseMeta = this.getResponseMetadata(controller, methodName)
     if (!responseMeta || responseMeta.data?.passthrough) {
-      const headers = Reflect.getMetadata('httpHeaders', method) ?? []
+      const headers = Reflect.getMetadata(HEADERS_METADATA, method) ?? []
       if (headers) {
         headers.forEach(({ key, value }: { key: string; value: string }) => {
           res.setHeader(key, value)
@@ -405,10 +414,10 @@ export class RouterExplorer {
     paramPipes: PipeTransform[][],
   ): Promise<any[]> {
     const params: ParamMetadata[] =
-      Reflect.getMetadata(`params:${methodName}`, instance, methodName) || []
+      Reflect.getMetadata(routeParamsMetadataKey(methodName), instance, methodName) || []
     // 参数的 TS 类型构造器数组(emitDecoratorMetadata 自动记录)，作为各参数的 metatype
     const paramtypes: any[] =
-      Reflect.getMetadata('design:paramtypes', instance, methodName) ?? []
+      Reflect.getMetadata(PARAMTYPES_METADATA, instance, methodName) ?? []
     // 自定义参数装饰器(createParamDecorator)拿到的执行上下文
     const ctx: ArgumentsHost = {
       switchToHttp: function () {
@@ -484,7 +493,7 @@ export class RouterExplorer {
   /** 查出方法上是否声明了 @Res / @Next（框架据此决定要不要自动发送响应） */
   private getResponseMetadata(instance: any, methodName: string) {
     const params: ParamMetadata[] =
-      Reflect.getMetadata(`params:${methodName}`, instance, methodName) || []
+      Reflect.getMetadata(routeParamsMetadataKey(methodName), instance, methodName) || []
     return params.filter(Boolean).find((meta) => meta.key === 'Response' || meta.key === 'Next')
   }
 

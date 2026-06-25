@@ -1,8 +1,8 @@
 import 'reflect-metadata'
 import { ArgumentsHost } from '../exceptions/exception-filter'
+import { USE_GUARDS_WATERMARK } from '../constant'
 
-/** @UseGuards 写在 controller 类 / 处理方法上的元数据 key：记录绑定的守卫 */
-export const USE_GUARDS_WATERMARK = 'use:guards'
+// USE_GUARDS_WATERMARK 已统一在 ../constant 定义，此处 import 使用。
 
 /**
  * ExecutionContext —— 执行上下文（对应 Nest 源码中的 ExecutionContext）。

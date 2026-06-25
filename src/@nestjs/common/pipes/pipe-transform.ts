@@ -1,13 +1,8 @@
 import 'reflect-metadata'
+import { USE_PIPES_WATERMARK } from '../constant'
 
-/** @UsePipes 写在 controller 类 / 处理方法上的元数据 key：记录绑定的管道 */
-export const USE_PIPES_WATERMARK = 'use:pipes'
-
-/**
- * 参数装饰器(@Body/@Query/@Param...)上额外存放的「参数级管道」元数据 key。
- * 与 params 元数据分开存：管道按参数下标存放，转换时按下标取出。
- */
-export const PARAM_PIPES_METADATA = 'pipes:param'
+// USE_PIPES_WATERMARK / PARAM_PIPES_METADATA 已统一在 ../constant 定义；
+// 本模块只用到 USE_PIPES_WATERMARK，参数级管道 key 由 param.decorator 直接从 constant 取。
 
 /**
  * 参数的「类型」——对应 Nest 的 Paramtype。
