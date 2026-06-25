@@ -4,6 +4,7 @@ import { LoggerService, PrefixService, UseFactoryService, UseValueService } from
 import { UserService } from './user/user.service'
 import { OtherService } from './other/other.service'
 import { HttpExceptionFilter } from './http-exception.filter'
+import { Param } from '@nestjs/common'
 
 @Controller()
 export class AppController {
@@ -61,5 +62,10 @@ export class AppController {
   async prefixPage() {
     this.prefixService.showPrefix()
     return 'ok'
+  }
+
+  @Get('hello/:id')
+  async myPipe(@Param('id') id: string) {
+    return 'hello' + id
   }
 }

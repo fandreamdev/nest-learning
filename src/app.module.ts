@@ -1,4 +1,11 @@
-import { APP_FILTER, MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common'
+import {
+  APP_FILTER,
+  APP_PIPE,
+  MiddlewareConsumer,
+  Module,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common'
 import { AppController } from './app.controller'
 import { LoggerService, PrefixService, UseFactoryService, UseValueService } from './log.service'
 import { UserModule } from './user/user.module'
@@ -8,6 +15,7 @@ import { LoggerMiddleware, functionMiddleware } from './logger.middleware'
 import { AllExceptionsFilter } from './all-exceptions.filter'
 import { LifecycleService } from './lifecycle.service'
 import { ProviderFeaturesModule } from './provider-features/provider-features.module'
+import { MyPipe } from './prefix-pipe'
 
 @Module({
   imports: [
@@ -45,6 +53,10 @@ import { ProviderFeaturesModule } from './provider-features/provider-features.mo
       // APP_FILTER：以 provider 方式注册全局过滤器，走 DI(过滤器可注入 LoggerService)
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,
+    },
+    {
+      provide: APP_PIPE,
+      useClass: MyPipe,
     },
   ],
 })
