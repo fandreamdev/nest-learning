@@ -26,6 +26,7 @@ npm run start:dev    # nodemon 热重载
 ## 已实现
 
 ### 依赖注入(DI)
+
 - 构造注入：基于 `design:paramtypes` 自动解析构造参数类型
 - `@Injectable` / `@Inject(token)` 显式指定注入 token
 - 四种 provider 写法：类本身、`useValue`、`useClass`、`useFactory`(含 `inject`)
@@ -37,6 +38,7 @@ npm run start:dev    # nodemon 热重载
   (约束同 Nest：循环引用只能在方法里用，不能在构造函数体内)
 
 ### 作用域(Scope) — 最小实现
+
 - `@Injectable({ scope })` + `Scope` 枚举：`DEFAULT`(单例) / `REQUEST`(请求级)
 - `REQUEST` 作用域 controller：每个 HTTP 请求新建一份(不再启动时建一次复用)，请求结束即丢弃
 - `@Inject(REQUEST)`：在 `REQUEST` 作用域 controller 构造里拿到「本次请求」的 `req` 对象
@@ -46,6 +48,7 @@ npm run start:dev    # nodemon 热重载
   实践中作用域很少用，请求级上下文通常优先用 `AsyncLocalStorage`
 
 ### 模块系统
+
 - `@Module({ imports, controllers, providers, exports })`
 - `imports` / `exports` 可见性织入，模块间隔离
 - `exports` 支持 re-export(导出另一个模块)
@@ -54,6 +57,7 @@ npm run start:dev    # nodemon 热重载
 - **异步动态模块**：`forRootAsync` 返回 `Promise<DynamicModule>`，扫描阶段 await 展开
 
 ### 控制器与路由
+
 - `@Controller(prefix)`
 - HTTP 方法：`@Get` / `@Post` / `@Put` / `@Delete` / `@Patch` / `@Options` / `@Head`(同一工厂生成，仅动词不同)
 - 参数装饰器：`@Req` / `@Res` / `@Body` / `@Query` / `@Param` / `@Headers` / `@Session` / `@Ip` / `@Next`
@@ -62,6 +66,7 @@ npm run start:dev    # nodemon 热重载
 - async 处理方法
 
 ### 中间件
+
 - `NestModule.configure(consumer)` + `MiddlewareConsumer`
 - `consumer.apply(...).forRoutes(...).exclude(...)` 链式 API
 - 类中间件(实现 `NestMiddleware`，支持 DI)与函数中间件
@@ -69,6 +74,7 @@ npm run start:dev    # nodemon 热重载
 - 按 HTTP 方法限定 + 路径前缀匹配 + `exclude` 排除
 
 ### 异常处理
+
 - `HttpException` 基类 + 语义化子类(`NotFoundException`、`BadRequestException` 等)
 - `HttpStatus` 状态码枚举
 - `@Catch()` 异常过滤器 + `ExceptionFilter` 接口 + `ArgumentsHost`
@@ -80,6 +86,7 @@ npm run start:dev    # nodemon 热重载
 - 过滤器自身抛异常时的兜底保护(退回默认处理，不悬挂请求)
 
 ### 管道(Pipes)
+
 - `PipeTransform` 接口 + `ArgumentMetadata`(`type` / `metatype` / `data`)
 - **四级绑定**：全局(`useGlobalPipes` / `APP_PIPE`) > 控制器级 / 方法级(`@UsePipes`) > 参数级(`@Body(pipe)`、`@Query('x', PipeA, PipeB)`)
 - 管道链按「全局 → 控制器 → 方法 → 参数」顺序串行 transform，前者输出喂给后者
@@ -91,6 +98,7 @@ npm run start:dev    # nodemon 热重载
 - 管道类实例 per-module 缓存(对齐 Nest，与过滤器同构)
 
 ### 守卫(Guards)
+
 - `CanActivate` 接口 + `ExecutionContext`(在 `ArgumentsHost` 上扩展 `getClass()` / `getHandler()`)
 - **三级绑定**：全局(`useGlobalGuards` / `APP_GUARD`) > 控制器级 / 方法级(`@UseGuards`)
 - 执行时机：**中间件 → 守卫 → 拦截器(前) → 管道 → 处理方法**(守卫在拦截器/管道之前)
@@ -101,6 +109,7 @@ npm run start:dev    # nodemon 热重载
 - 守卫类实例 per-module 缓存(对齐 Nest，与过滤器/管道同构)
 
 ### 拦截器(Interceptors)
+
 - `NestInterceptor` 接口 + `CallHandler`(`handle()` 返回 RxJS `Observable`)，共享守卫的 `ExecutionContext`
 - **三级绑定**：全局(`useGlobalInterceptors` / `APP_INTERCEPTOR`) > 控制器级 / 方法级(`@UseInterceptors`)
 - 执行模型(对齐 Nest)：**守卫 → 拦截器(前置) → 管道 → 处理方法 → 拦截器(后置) → 发送响应**
@@ -110,17 +119,13 @@ npm run start:dev    # nodemon 热重载
 - 拦截器类实例 per-module 缓存(对齐 Nest，与过滤器/管道/守卫同构)
 
 ### 生命周期钩子(Lifecycle Hooks)
+
 - 启动钩子：`OnModuleInit` → `OnApplicationBootstrap`(所有 provider 实例化、路由注册完毕后正序触发)
 - 关闭钩子：`OnModuleDestroy` → `BeforeApplicationShutdown` → `OnApplicationShutdown`(按初始化逆序，后建先拆)
 - 钩子可为 async，框架逐个 `await`；shutdown 类钩子会收到触发的信号(如 `SIGTERM`)
 - `app.enableShutdownHooks()`：监听 `SIGINT`/`SIGTERM`，收到后优雅关闭(先停 HTTP server 再跑关闭钩子)
 - `app.close()`：手动触发优雅关闭，与信号路径共用同一流程(幂等，避免重复执行)
 - 鸭子类型识别：实例上有对应方法即视为实现该钩子；按容器实例化顺序(Map 插入序)正序/逆序遍历
-
-## 尚未实现
-
-- **作用域(Scope)的进阶部分**：`TRANSIENT` 作用域、作用域冒泡、请求级 provider(需请求级子容器)
-- **其它**：微服务、WebSocket、测试工具(`@nestjs/testing`)等
 
 ## 目录结构
 
