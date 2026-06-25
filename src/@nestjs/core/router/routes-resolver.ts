@@ -28,6 +28,8 @@ import {
   REDIRECT_STATUS_METADATA,
   PARAMTYPES_METADATA,
   routeParamsMetadataKey,
+  getScope,
+  Scope,
 } from '@nestjs/common'
 import { Logger } from '../log'
 import { Injector } from '../injector/injector'
@@ -74,11 +76,18 @@ export class RouterExplorer {
    * @param module     controller 归属的模块（用于解析其构造依赖的可见性）
    */
   async explore(Controller: any, module: any) {
-    // 解析 controller 构造依赖并实例化(依赖解析是异步的，需 await)
-    const params = await this.injector.resolveDependencies(Controller, module)
-    const controller = new Controller(...params)
+    // 作用域：REQUEST 的 controller 不在启动时实例化，改为每请求新建；DEFAULT 仍是启动建一次的单例
+    const scope = getScope(Controller)
+    const isRequestScoped = scope === Scope.REQUEST
+    // 单例 controller：启动时实例化一次复用；请求级：先置空，每请求在 handleRequest 里建
+    const controller = isRequestScoped
+      ? null
+      : new Controller(...(await this.injector.resolveDependencies(Controller, module)))
     const prefix = Reflect.getMetadata(CONTROLLER_PREFIX_METADATA, Controller) || '/'
-    Logger.log(`${Controller.name} {${prefix}}`, 'RoutersResolver')
+    Logger.log(
+      `${Controller.name} {${prefix}}${isRequestScoped ? ' (REQUEST scoped)' : ''}`,
+      'RoutersResolver',
+    )
 
     // 控制器级 @UseFilters：对该 controller 下所有路由生效(实例化一次复用)
     const controllerFilters = await this.resolveFilters(Controller, module)
@@ -125,6 +134,8 @@ export class RouterExplorer {
         this.handleRequest(
           Controller,
           controller,
+          module,
+          isRequestScoped,
           methodName,
           method,
           req,
@@ -315,6 +326,8 @@ export class RouterExplorer {
   private async handleRequest(
     Controller: new (...args: any[]) => any,
     controller: any,
+    module: any,
+    isRequestScoped: boolean,
     methodName: string,
     method: Function,
     req: Request,
@@ -335,6 +348,12 @@ export class RouterExplorer {
         .filter(Boolean),
     }
 
+    // REQUEST 作用域：为本次请求新建一份 controller(其 @Inject(REQUEST) 解析为当前 req)；
+    // 单例则用启动时建好的那份。后续守卫/管道/方法调用都用 instance。
+    const instance = isRequestScoped
+      ? await this.injector.instantiateRequestScoped(Controller, module, req)
+      : controller
+
     // 守卫与拦截器共享同一个执行上下文(可拿 req/res + getClass/getHandler)
     const executionContext = this.createExecutionContext(req, res, next, Controller, method)
 
@@ -346,7 +365,7 @@ export class RouterExplorer {
     //    放进拦截器链内层，确保管道在拦截器「前置逻辑之后」执行(对齐 Nest)。
     const handler = async () => {
       const args = await this.resolveParams(
-        controller,
+        instance,
         methodName,
         req,
         res,
@@ -354,7 +373,7 @@ export class RouterExplorer {
         classMethodPipes,
         paramPipes,
       )
-      return method.call(controller, ...args)
+      return method.call(instance, ...args)
     }
 
     // 3) 拦截器链：全局 -> 控制器 -> 方法，「由外到内」包裹 handler，求出经全部后置变换的最终值
@@ -382,7 +401,7 @@ export class RouterExplorer {
     }
 
     // 没有用 @Res 接管响应(或声明了 passthrough)时，由框架负责设置响应头并发送结果
-    const responseMeta = this.getResponseMetadata(controller, methodName)
+    const responseMeta = this.getResponseMetadata(instance, methodName)
     if (!responseMeta || responseMeta.data?.passthrough) {
       const headers = Reflect.getMetadata(HEADERS_METADATA, method) ?? []
       if (headers) {

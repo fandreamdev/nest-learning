@@ -36,6 +36,15 @@ npm run start:dev    # nodemon 热重载
 - 循环依赖 `forwardRef(() => Xxx)`：延迟解包引用，对「在建中」的依赖返回惰性代理闭合循环
   (约束同 Nest：循环引用只能在方法里用，不能在构造函数体内)
 
+### 作用域(Scope) — 最小实现
+- `@Injectable({ scope })` + `Scope` 枚举：`DEFAULT`(单例) / `REQUEST`(请求级)
+- `REQUEST` 作用域 controller：每个 HTTP 请求新建一份(不再启动时建一次复用)，请求结束即丢弃
+- `@Inject(REQUEST)`：在 `REQUEST` 作用域 controller 构造里拿到「本次请求」的 `req` 对象
+- `@Injectable` 兼容裸用(`@Injectable`)与工厂用(`@Injectable()` / `@Injectable({ scope })`)
+- 范围说明：仅实现 controller 自身的 `REQUEST` 作用域 + `REQUEST` token；**不**做 `TRANSIENT`、
+  **不**做「作用域冒泡」、不支持把普通 provider 标成 `REQUEST`(那需要请求级子容器)。
+  实践中作用域很少用，请求级上下文通常优先用 `AsyncLocalStorage`
+
 ### 模块系统
 - `@Module({ imports, controllers, providers, exports })`
 - `imports` / `exports` 可见性织入，模块间隔离
@@ -110,7 +119,7 @@ npm run start:dev    # nodemon 热重载
 
 ## 尚未实现
 
-- **作用域(Scope)**：`REQUEST` / `TRANSIENT` 作用域(目前全部是单例)
+- **作用域(Scope)的进阶部分**：`TRANSIENT` 作用域、作用域冒泡、请求级 provider(需请求级子容器)
 - **其它**：微服务、WebSocket、测试工具(`@nestjs/testing`)等
 
 ## 目录结构

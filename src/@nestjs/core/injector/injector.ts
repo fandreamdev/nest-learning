@@ -4,6 +4,7 @@ import {
   PARAMTYPES_METADATA,
   OPTIONAL_DEPS_METADATA,
   PROPERTY_DEPS_METADATA,
+  REQUEST,
   resolveForwardRef,
 } from '@nestjs/common'
 import { NestContainer } from './nest-container'
@@ -201,8 +202,15 @@ export class Injector {
    * 解析一个类构造函数所需的全部依赖，返回按参数顺序排好的实例数组。
    * @param Component 待解析的类（controller 或 provider 类）
    * @param module    该组件归属的模块，用于做依赖可见性校验
+   * @param context   可选的「请求级上下文」：token -> 实例 的覆盖表。
+   *                  REQUEST 作用域实例化时传入 { [REQUEST]: req }，使依赖里的 REQUEST token
+   *                  直接解析为当前请求对象，而非走全局单例表。
    */
-  async resolveDependencies(Component: any, module: any = this.rootModule): Promise<any[]> {
+  async resolveDependencies(
+    Component: any,
+    module: any = this.rootModule,
+    context?: Map<any, any>,
+  ): Promise<any[]> {
     // design:paramtypes 是 emitDecoratorMetadata 自动记录的构造参数类型
     const paramtypes: any[] = Reflect.getMetadata(PARAMTYPES_METADATA, Component) ?? []
     // INJECT_TOKEN 是 @Inject('xx') 显式指定的 token，按参数下标存放
@@ -214,6 +222,11 @@ export class Injector {
     for (let index = 0; index < paramtypes.length; index++) {
       // 有 @Inject 用其 token，否则回退到 TS 推断的参数类型；token 可能是 forwardRef，先解包
       const token = resolveForwardRef(tokens[index] ?? paramtypes[index])
+      // 请求级上下文命中(如 REQUEST token)：直接用上下文里的实例，不走容器
+      if (context?.has(token)) {
+        dependencies.push(context.get(token))
+        continue
+      }
       // 可见性校验：该 token 必须在「本模块集合」或「全局集合」中，否则不允许注入
       if (!this.container.isVisible(token, module)) {
         // @Optional() 标记的参数：解析不到就注入 undefined，不报错
@@ -229,5 +242,21 @@ export class Injector {
       dependencies.push(await this.getOrCreateInstance(token))
     }
     return dependencies
+  }
+
+  /**
+   * 按「请求级上下文」实例化一个 controller(REQUEST 作用域专用)。
+   * 每个 HTTP 请求调用一次：用当前 req 建一个上下文({ [REQUEST]: req })，据此解析构造依赖
+   * 并 new 出一份「本请求专属」的 controller，不进全局单例表，请求结束即随上下文丢弃。
+   * @param Controller controller 类
+   * @param module     controller 归属模块(可见性上下文)
+   * @param req        当前请求对象，作为 REQUEST token 的解析值
+   */
+  async instantiateRequestScoped(Controller: any, module: any, req: any): Promise<any> {
+    const context = new Map<any, any>([[REQUEST, req]])
+    const deps = await this.resolveDependencies(Controller, module, context)
+    const instance = new Controller(...deps)
+    await this.injectProperties(instance, Controller, module)
+    return instance
   }
 }

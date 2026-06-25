@@ -20,6 +20,17 @@ export const PROPERTY_DEPS_METADATA = 'self:properties_metadata'
 /** TS 的 emitDecoratorMetadata 自动写入的「构造/方法参数类型」key(内置约定，值固定) */
 export const PARAMTYPES_METADATA = 'design:paramtypes'
 
+/** @Injectable({ scope }) 写在类上的元数据 key：记录该类的作用域(DEFAULT/REQUEST) */
+export const SCOPE_METADATA = 'scope:metadata'
+
+/**
+ * REQUEST —— 注入「当前请求对象」的特殊 token（对应 Nest 源码中的 REQUEST）。
+ *
+ * REQUEST 作用域的类可用 @Inject(REQUEST) 在构造里拿到本次请求的 req。
+ * 框架在每个请求建立的请求级上下文里，把它解析为当前 express 的 req 对象。
+ */
+export const REQUEST = 'REQUEST'
+
 // ——— 模块系统 ———
 
 /** @Module 写在模块类上：标记「这是一个模块」 */
