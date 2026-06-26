@@ -16,6 +16,7 @@ import { AllExceptionsFilter } from './all-exceptions.filter'
 import { LifecycleService } from './lifecycle.service'
 import { ProviderFeaturesModule } from './provider-features/provider-features.module'
 import { MyPipe } from './prefix-pipe'
+import { UserMiddleware } from './user/middleware/user.middleware'
 
 @Module({
   imports: [
@@ -70,6 +71,8 @@ export class AppModule implements NestModule {
     consumer
       .apply(LoggerMiddleware)
       .exclude({ path: '/config', method: RequestMethod.GET })
+      .forRoutes('*')
+      .apply(UserMiddleware)
       .forRoutes('*')
 
     consumer.apply(functionMiddleware).forRoutes({ path: '/users', method: RequestMethod.GET })

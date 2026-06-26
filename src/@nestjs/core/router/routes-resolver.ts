@@ -338,16 +338,6 @@ export class RouterExplorer {
     classMethodPipes: PipeTransform[],
     paramPipes: PipeTransform[][],
   ) {
-    ;(req as any).user = {
-      name: 'tom1',
-      age: 10,
-      // 模拟鉴权层写入的角色：从 x-roles 头取(逗号分隔)，供 RolesGuard 演示判定
-      roles: ((req.headers['x-roles'] as string) ?? '')
-        .split(',')
-        .map((r) => r.trim())
-        .filter(Boolean),
-    }
-
     // REQUEST 作用域：为本次请求新建一份 controller(其 @Inject(REQUEST) 解析为当前 req)；
     // 单例则用启动时建好的那份。后续守卫/管道/方法调用都用 instance。
     const instance = isRequestScoped
@@ -381,7 +371,11 @@ export class RouterExplorer {
       ...this.interceptorsConsumer.getGlobalInterceptors(),
       ...classMethodInterceptors,
     ]
-    const result = await this.interceptorsConsumer.intercept(executionContext, interceptors, handler)
+    const result = await this.interceptorsConsumer.intercept(
+      executionContext,
+      interceptors,
+      handler,
+    )
 
     const httpCode = Reflect.getMetadata(HTTP_CODE_METADATA, method)
     const httpMethod = Reflect.getMetadata(METHOD_METADATA, method)
@@ -435,8 +429,7 @@ export class RouterExplorer {
     const params: ParamMetadata[] =
       Reflect.getMetadata(routeParamsMetadataKey(methodName), instance, methodName) || []
     // 参数的 TS 类型构造器数组(emitDecoratorMetadata 自动记录)，作为各参数的 metatype
-    const paramtypes: any[] =
-      Reflect.getMetadata(PARAMTYPES_METADATA, instance, methodName) ?? []
+    const paramtypes: any[] = Reflect.getMetadata(PARAMTYPES_METADATA, instance, methodName) ?? []
     // 自定义参数装饰器(createParamDecorator)拿到的执行上下文
     const ctx: ArgumentsHost = {
       switchToHttp: function () {

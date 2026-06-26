@@ -157,4 +157,9 @@ export class UserController {
     console.log('customParamsDecoratorName: ', name)
     return user
   }
+
+  @Get('me')
+  getSelf(@User() user: any) {
+    return user
+  }
 }
