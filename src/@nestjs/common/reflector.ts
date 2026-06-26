@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { SetMetadata } from './set-metadata.decorator'
 
 /**
  * Reflector —— 元数据读取工具（对应 Nest 源码中的 Reflector）。
@@ -50,5 +51,14 @@ export class Reflector {
       return Object.assign({}, ...values) as T
     }
     return values[values.length - 1] as T
+  }
+
+  static createDecorator() {
+    function decoratorFactory(metadataValue: any) {
+      return (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor) => {
+        SetMetadata(decoratorFactory, metadataValue)
+      }
+    }
+    return decoratorFactory
   }
 }

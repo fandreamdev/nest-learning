@@ -13,7 +13,7 @@ import 'reflect-metadata'
  *   @SetMetadata('roles', ['admin'])            // 直接用
  *   export const Roles = (...roles: string[]) => SetMetadata('roles', roles)  // 封装语义化装饰器
  */
-export function SetMetadata(metadataKey: string, metadataValue: any) {
+export function SetMetadata(metadataKey: any, metadataValue: any) {
   return (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor) => {
     if (descriptor) {
       Reflect.defineMetadata(metadataKey, metadataValue, descriptor.value)
