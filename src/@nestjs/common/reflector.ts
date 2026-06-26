@@ -55,9 +55,7 @@ export class Reflector {
 
   static createDecorator() {
     function decoratorFactory(metadataValue: any) {
-      return (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor) => {
-        SetMetadata(decoratorFactory, metadataValue)
-      }
+      return SetMetadata(decoratorFactory, metadataValue)
     }
     return decoratorFactory
   }
