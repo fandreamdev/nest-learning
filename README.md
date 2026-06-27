@@ -92,6 +92,7 @@ npm run start:dev    # nodemon 热重载
 - 管道链按「全局 → 控制器 → 方法 → 参数」顺序串行 transform，前者输出喂给后者
 - `metatype` 取自 `design:paramtypes`，故 `ValidationPipe` 自动跳过 `@Req`/`@Res` 等非 DTO 参数
 - 内置管道：`ParseIntPipe` / `ParseFloatPipe` / `ParseBoolPipe` / `ParseArrayPipe` / `ParseUUIDPipe` / `ParseEnumPipe` / `DefaultValuePipe`
+- `ParseFilePipe`：校验上传文件，规则与管道分离 —— 由一组 `FileValidator` 提供(`MaxFileSizeValidator` 限大小、`FileTypeValidator` 限 MIME)，按序 fail-fast；支持 `fileIsRequired`、`errorHttpStatusCode`、`exceptionFactory`
 - `ValidationPipe`：`toValidate` → `plainToInstance` → `validate` → 抛 `BadRequestException`(`message[]`)，结构对齐 Nest
 - 配套轻量校验装饰器(`@IsString`/`@IsInt`/`@Min`/`@MinLength` 等)作为 class-validator 的等价替身
 - `APP_PIPE`：以 provider 方式注册全局管道(走 DI，可注入其它 provider)
