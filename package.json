@@ -6,6 +6,7 @@
   "scripts": {
     "start": "ts-node -r tsconfig-paths/register src/main.ts",
     "start:dev": "nodemon",
+    "example": "ts-node --project docs/tsconfig.json -r tsconfig-paths/register",
     "build": "nest build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
